@@ -1,0 +1,290 @@
+You are Replit Agent. Build a complete MVP web app for a custom dart game called:
+
+FOOTBALL (DART GAME)
+
+This prompt is fully self-contained. Do not ask follow-up questions.
+If ambiguity exists, make a reasonable assumption and document it in the README under “Assumptions”.
+
+================================================================================
+TECH STACK
+================================================================================
+- Next.js (App Router) + TypeScript
+- TailwindCSS
+- SQLite + Prisma
+- No authentication
+- Persistent local Player Profiles (no login)
+
+================================================================================
+CORE APP REQUIREMENTS
+================================================================================
+
+1) PLAYER PROFILES
+- Create, edit, list profiles
+- Profile detail page with aggregated stats and head-to-head history
+
+2) RULES IN THE APP
+- Create `/content/rules.md` as the canonical rules source
+- Create `/rules` page that renders the markdown
+- Display Rules Version + Last Updated from markdown frontmatter
+- Games must store which rulesVersion they were played under
+
+3) NEW GAME FLOW
+- `/new` page:
+  - Select Player 1 and Player 2 profiles
+  - Inline create profile modal
+  - Coin flip determines who goes first in Q1
+  - Start Game creates Game + first Drive and routes to `/game/[id]`
+
+4) IN-GAME TRACKER
+- `/game/[id]` page:
+  - Scoreboard: players, score, quarter, possession
+  - Field position display: OWN / 50 / OPP
+  - Dart counter (1–4, plus possible bonus dart)
+  - Action buttons (rules-aware enable/disable):
+    - Record Dart
+    - Attempt Field Goal
+    - Punt
+  - After TD: choose PAT or 2PT
+  - Play-by-play feed (NFL-style)
+  - Undo last input (recompute from events)
+  - Automatic drive and quarter advancement with confirmation
+
+5) HISTORY
+- `/history` page lists completed games
+- Clicking a game shows summary and drive results
+
+6) STATS (computed from DB)
+Profile stats:
+- Games played, wins, losses, win %
+- Total points, points per game
+- Drives, points per drive
+- TDs
+- Inner bull TDs
+- FG attempts/makes/%
+- PAT attempts/makes/%
+- 2PT attempts/makes/%
+- Head-to-head W/L vs all profiles
+
+================================================================================
+AUTHORITATIVE GAME RULES (ENGINE MUST MATCH EXACTLY)
+================================================================================
+
+--------------------------------
+FIELD MODEL
+--------------------------------
+- Field = 0–100 yards from offense perspective
+  - Own goal line = 0
+  - Midfield = 50
+  - Opponent goal line = 100
+- Default drive start = OWN 30 unless modified by punt or missed FG
+
+Display:
+- pos < 50 → “OWN {pos}”
+- pos == 50 → “50”
+- pos > 50 → “OPP {100 - pos}”
+
+--------------------------------
+QUARTERS & POSSESSIONS
+--------------------------------
+- Regulation = 4 quarters
+- Each quarter: each player gets TWO drives
+- Possessions alternate within each quarter
+- Player who does NOT receive first in Q1 receives first in Q3
+- Total regulation drives per player = 8
+
+--------------------------------
+DRIVES
+--------------------------------
+- Each drive allows up to 4 darts
+- Drive ends by:
+  - Touchdown
+  - Field goal attempt
+  - Punt
+  - Bust
+- Bust is NOT a turnover
+
+--------------------------------
+DART SCORING (OFFENSE)
+--------------------------------
+- Single = base number
+- Double = base × 2
+- Triple = base × 3
+- Outer bull = 25 yards
+- Inner bull = automatic TD anywhere
+- Miss = 0 yards
+
+--------------------------------
+TOUCHDOWNS
+--------------------------------
+A touchdown is scored by either:
+
+A) INNER BULL
+- Automatic TD anywhere on the field
+
+B) EXACT GOAL LINE
+- Required distance = 100 − driveStartPos
+- If driveYards == required → TD
+- If driveYards > required → Bust
+
+C) 4TH-DART ONE-YARD CUSHION (DEAD-NUMBER FIX)
+To guarantee at least two TD conditions for all remaining distances 21–50:
+
+- On the 4th dart only:
+- If remainingDistance is between 21–50 AND
+- The only single-dart TD option is inner bull
+- The offense may instead:
+
+1) Use the 4th dart to land exactly at the 1-yard line
+   (4thDartYards = remainingDistance − 1)
+2) Receive ONE bonus dart
+3) Bonus dart must be a SINGLE 1
+
+- Hit Single 1 → TD
+- Miss → no score, drive ends
+
+TD = 6 points
+
+--------------------------------
+CONVERSIONS (1 DART)
+--------------------------------
+After TD, must choose one:
+
+PAT (1 point):
+- Same as 30–39 yd FG
+- Must hit any SINGLE triangle between numbers 5–1
+- Doubles/triples do not count
+
+2-POINT TRY (2 points):
+- Must declare “Going for 2”
+- Must hit number 2 in any segment
+
+--------------------------------
+FIELD GOALS
+--------------------------------
+Eligibility:
+- Ball position ≥ 50
+- Must be declared
+- 1 dart, ends drive
+
+Targets based on opponent yard line (100 − pos):
+- 0–29 → SINGLE 12–18
+- 30–39 → SINGLE 5–1
+- 40–50 → SINGLE 20
+
+Scoring:
+- Make = 3 points
+- Miss = 0 points
+
+Missed FG possession rule:
+- Opponent’s next drive starts at the spot of the kick
+- Convert perspective: opponentStartPos = 100 − kickPos
+- This is the ONLY non-punt situation where field position carries over
+
+--------------------------------
+PUNTING
+--------------------------------
+Eligibility:
+- Only on 4th dart
+- Only if position < 50
+- Must be declared
+- 1 dart, ends drive
+
+Receiving team start:
+- Inner bull → OWN 5
+- Outer bull → OWN 10
+- Single (inner ring) → OWN 30
+- Single (outer ring) → OWN 20
+- Any double → OWN 20
+- Any triple → Returned punt:
+  - Start OWN 20
+  - Return yards = triple point value (base × 3)
+  - Example: T20 → start at OPP 20
+- Miss → Blocked punt:
+  - Receiving starts at punt spot
+  - opponentStartPos = 100 − puntPos
+
+Punts never score points.
+
+--------------------------------
+OVERTIME
+--------------------------------
+- If tied after regulation:
+  - Each team gets at least one possession
+  - Drives start at OWN 30 unless modified by punt or missed FG
+  - After both teams have a possession, any score that creates a lead ends the game
+
+================================================================================
+ENGINE REQUIREMENTS
+================================================================================
+Create a pure deterministic TypeScript engine (no UI logic):
+
+/src/lib/engine/types.ts
+/src/lib/engine/engine.ts
+/src/lib/engine/format.ts
+
+Expose functions:
+- createGame
+- startNextDrive
+- getAvailableActions
+- applyOffenseDart
+- applyFieldGoalAttempt
+- applyPuntAttempt
+- chooseConversion
+- applyConversionDart
+- advance
+- undo (replay from events)
+
+Include unit tests for:
+- Inner bull TD
+- Outer bull = 25
+- Exact-distance TD
+- Bust logic
+- 4th-dart one-yard cushion + bonus dart
+- FG targets + missed FG field-position carryover
+- Punt outcomes including triple returns and blocked punts
+
+================================================================================
+DATABASE (PRISMA)
+================================================================================
+Models:
+- Profile
+- Game (store rulesVersion)
+- Drive
+- Throw
+- Event
+
+Stats must be derived from DB queries.
+
+================================================================================
+ROUTES
+================================================================================
+/profiles
+/profiles/[id]
+/new
+/game/[id]
+/history
+/rules
+
+================================================================================
+RULES MARKDOWN (REQUIRED)
+================================================================================
+Create `/content/rules.md` with frontmatter:
+
+---
+rulesVersion: "0.9"
+lastUpdated: "2025-12-22"
+---
+
+Populate it with the same rules above written for players (not developers).
+Do not paraphrase. This file is the canonical rules source.
+
+================================================================================
+DELIVERABLES
+================================================================================
+- Fully working app
+- Engine + tests
+- Prisma schema + migrations
+- Seed data (≥4 profiles, 1 completed game)
+- README with run instructions and assumptions
+
+Build everything now.

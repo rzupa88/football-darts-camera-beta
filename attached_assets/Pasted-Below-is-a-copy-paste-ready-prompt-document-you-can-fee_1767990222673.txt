@@ -1,0 +1,274 @@
+Below is a **copy/paste-ready prompt/document** you can feed to Replit to implement **matchup lines (spread + moneyline + total)** using the exported tables exactly as provided (`profiles`, `games`, `drives`, `dart_throws`, `events`). It’s designed to generate the line **after two profiles are selected but before the coin toss**.
+
+---
+
+## Feature: Matchup Lines (Pre–Coin Toss)
+
+### Goal
+
+Given two selected profiles (Team A / Team B), compute:
+
+1. **Point Spread** (A -x.x / B +x.x)
+2. **Moneyline Odds** for each team (American odds)
+3. **Total (Over/Under)**
+
+This must be **pre–coin toss**, so it should **not** include first-possession advantage. (We will add a separate post-toss adjustment hook.)
+
+---
+
+# 1) Data Sources
+
+Use these exported tables (Excel -> DB tables with same names/columns):
+
+* `profiles`
+* `games`
+* `drives`
+* `dart_throws`
+* `events`
+
+Assumptions:
+
+* `games` records final score / winner / player1_id / player2_id / first_possession etc.
+* `drives` records each possession with points and darts (or can be derived)
+* `dart_throws` records each dart outcome (hit/miss, segment, multiplier, etc.)
+* `events` records higher-level scoring events (TD, FG attempt, FG good, turnover, etc.)
+
+If any metric cannot be computed from one table, compute from another (priority: drives -> events -> dart_throws).
+
+---
+
+# 2) Metrics to Compute Per Profile
+
+Compute these **per profile** over all historical data:
+
+### A) Results / Strength
+
+* `games_played`
+* `avg_margin`
+  = average over games of (points_for - points_against)
+
+### B) Efficiency (core predictor in this game)
+
+* `points_per_dart`
+  = total_points_scored / total_darts_thrown
+  (Use `drives` to sum `drive_points` and `darts_thrown_in_drive`. If not available, count darts in `dart_throws` linked to the drive.)
+
+* `avg_points_per_drive`
+  = total_points_scored / total_drives
+
+### C) Execution / Mistakes
+
+* `fg_make_rate`
+  = fg_good / fg_attempts
+  (Prefer `events` where type in {FG_ATTEMPT, FG_GOOD}. If FG_GOOD implies an attempt, count both accordingly.)
+
+* `miss_rate`
+  = misses / total_darts
+  (From `dart_throws`, define miss as a dart that produces no valid scoring/target result per your rules.)
+
+* `bust_rate` (optional if you track it cleanly)
+  = busts / total_drives OR busts / total_darts
+  (Use `events` if you record busts; otherwise skip in V1.)
+
+---
+
+# 3) Normalize Metrics (Z-scores)
+
+For each metric across all profiles, compute mean and standard deviation:
+
+For metric `x`:
+
+* `z = (x - mean_x) / std_x`
+* If `std_x == 0`, set `z = 0`
+
+We will use z-scores to combine stats with different scales.
+
+---
+
+# 4) Power Rating Formula (Pre–Coin Toss)
+
+Compute raw power rating:
+
+```
+power_raw =
+  0.45 * z_avg_margin
++ 0.25 * z_points_per_dart
++ 0.15 * z_fg_make_rate
+- 0.10 * z_miss_rate
+- 0.05 * z_bust_rate    // if unavailable, treat as 0
+```
+
+### Shrinkage (important for small samples)
+
+To avoid overreacting to limited games, shrink toward league average (0 in z-space):
+
+```
+prior = 8  // tunable constant
+w = games_played / (games_played + prior)
+
+power_adj = w * power_raw + (1 - w) * 0
+```
+
+---
+
+# 5) Convert Power Ratings to Spread
+
+### A) Expected margin
+
+```
+scale = 1.75   // starting value, tune via backtesting
+expected_margin = (power_adj_A - power_adj_B) * scale
+```
+
+### B) Round to a sportsbook-style spread
+
+Use half-point lines to avoid ties:
+
+```
+spread = round(expected_margin * 2) / 2
+```
+
+Interpretation:
+
+* If `spread = -3.5`, Team A favored by 3.5 (A -3.5, B +3.5)
+* If `spread = +2.0`, Team B favored by 2.0 (B -2.0, A +2.0)
+
+(Implementation note: present as “A -x.x” when spread is negative; otherwise “B -x.x”.)
+
+---
+
+# 6) Convert Expected Margin to Win Probability
+
+Use a logistic curve:
+
+```
+K = 6.0  // tunable; smaller = steeper probability swing
+
+pA = 1 / (1 + exp(-expected_margin / K))
+pB = 1 - pA
+```
+
+Clamp extreme values (avoid infinite odds):
+
+```
+pA = min(max(pA, 0.02), 0.98)
+pB = 1 - pA
+```
+
+---
+
+# 7) Convert Win Probability to American Moneyline
+
+Function `prob_to_american(p)`:
+
+* If `p >= 0.5` (favorite):
+
+```
+odds = - round( (p / (1 - p)) * 100 )
+```
+
+* If `p < 0.5` (underdog):
+
+```
+odds = + round( ((1 - p) / p) * 100 )
+```
+
+Examples:
+
+* p = 0.60 → -150
+* p = 0.40 → +150
+
+Return integers (standard).
+
+---
+
+# 8) Total (Over/Under) Formula (V1)
+
+Compute for each profile:
+
+* `avg_points_for` (PF)
+* `avg_points_against` (PA)
+
+Then expected total:
+
+```
+total_raw =
+  ((PF_A + PA_B) + (PF_B + PA_A)) / 2
+```
+
+Round to half-point:
+
+```
+total = round(total_raw * 2) / 2
+```
+
+Optional tightening: if you have pace (drives/game), you can adjust totals later.
+
+---
+
+# 9) Pre–Coin Toss Requirement
+
+This output must be neutral regarding first possession.
+
+✅ Therefore do NOT apply any first-possession adjustment here.
+
+### Post–coin toss hook (separate function)
+
+After coin toss you *may* apply:
+
+```
+first_possession_edge = 2.0  // conservative starter value; tune later
+// If Team A receives first: spread_post = spread - first_possession_edge
+// If Team B receives first: spread_post = spread + first_possession_edge
+```
+
+Keep this separate from pregame line generation.
+
+---
+
+# 10) Implementation Shape
+
+Create a function:
+
+```
+getMatchupLine(profileAId, profileBId) => {
+  spread,
+  moneylineA,
+  moneylineB,
+  total,
+  expected_margin,
+  pA,
+  pB,
+  debug: { powerA, powerB, metricsA, metricsB }
+}
+```
+
+### Debug output is critical
+
+Log the underlying metrics and power so we can tune weights/scale later.
+
+---
+
+# 11) Backtesting (Required)
+
+Build a script to evaluate on historical games:
+For each completed game:
+
+* compute pregame line using only data available **before that game** (if you have timestamps; if not, use full-history as a first pass)
+* compare `expected_margin` vs actual margin
+* report MAE (mean absolute error)
+* tune `scale` and optionally weights/K
+
+Even without time-slicing, initial backtest will validate the machinery.
+
+---
+
+## Deliverable UI Copy (Example)
+
+* Spread: `A -3.5`
+* Moneyline: `A -165 / B +145`
+* Total: `O/U 39.5`
+
+---
+
+If you want, I can also give you a **second prompt** that tells Replit exactly how to compute each metric from each table (the actual joins/group-bys), but the above is the full “odds math + line generation” spec that’s ready to implement.

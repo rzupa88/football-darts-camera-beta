@@ -1,0 +1,213 @@
+You are Replit Agent. We already have a working MVP for “Football (Dart Game)” (Next.js + TS + Tailwind). 
+Your task now is to ADD a PostgreSQL-backed stats system that tracks EVERY DART thrown by EVERY player with rich data points, and produces profile stats + head-to-head history.
+
+DO NOT ASK FOLLOW-UP QUESTIONS. If something is ambiguous, make a reasonable assumption and document it in README under “Assumptions”.
+
+================================================================================
+GOALS
+================================================================================
+1) Replace/upgrade persistence layer to PostgreSQL (or add Postgres as the primary DB if currently using SQLite).
+2) Create a robust relational schema that stores:
+   - Profiles
+   - Rulesets (rules versioning)
+   - Games
+   - Participants
+   - Drives (possessions)
+   - Dart throws (one row per dart; raw input + computed outcomes + state snapshots)
+   - Optional game events (play-by-play beyond throws)
+3) Update the app so every dart input creates a durable dart_throws row with maximum useful metadata.
+4) Add Stats pages that compute:
+   - Points per drive
+   - Inner bull TDs
+   - FG%, PAT%, 2PT%
+   - Win%
+   - Head-to-head record + points for/against
+5) Provide SQL migrations and/or Prisma schema (prefer Prisma) and ensure the app runs on Replit.
+
+================================================================================
+TECH + IMPLEMENTATION REQUIREMENTS
+================================================================================
+- Use PostgreSQL as the source of truth.
+- Use Prisma ORM with migrations (preferred) unless the project is already SQL-first; if so, still provide migrations.
+- Keep the game engine deterministic: the DB should store both raw inputs and computed results from the engine.
+- IMPORTANT: We want “set and forget” analytics: store pos_before/pos_after and computed flags so stats queries do not require replaying every game.
+- Ensure existing UI flows keep working. Only adjust components where needed for persistence.
+
+================================================================================
+DATABASE DESIGN (AUTHORITATIVE)
+================================================================================
+
+TABLE: profiles
+- id (uuid pk, default gen_random_uuid())
+- display_name (text, unique-ish)
+- created_at, updated_at (timestamptz)
+
+TABLE: rulesets
+- id (uuid pk)
+- version (text unique) e.g. "0.9"
+- last_updated (date)
+- rules_markdown (text) OR rules_hash (text) (choose one; rules_markdown is fine for MVP)
+- created_at (timestamptz)
+
+TABLE: games
+- id (uuid pk)
+- ruleset_id (fk rulesets)
+- status (enum/text: in_progress, final)
+- started_at, ended_at
+- coin_flip_winner_profile_id (fk profiles, nullable)
+- q1_first_possession_profile_id (fk profiles)
+- winner_profile_id (fk profiles, nullable)
+- notes (text)
+
+TABLE: game_participants  (supports 2 now, extendable later)
+- game_id (fk games)
+- profile_id (fk profiles)
+- seat (int) 1,2
+- team_name (text optional)
+- PRIMARY KEY (game_id, profile_id)
+
+TABLE: drives  (possession-level; used for points/drive and NFL style splits)
+- id (uuid pk)
+- game_id (fk)
+- period_type (regulation|overtime)
+- quarter (int, nullable if OT)
+- drive_in_quarter (int) 1..4 (since 2 possessions per player per qtr)
+- sequence_in_game (int) absolute ordering
+- offense_profile_id (fk profiles)
+- start_pos (int 0..100)
+- start_reason (default_own_30 | punt_result | blocked_punt | missed_fg_spot)
+- end_pos (int 0..100 nullable)
+- result (td|fg_made|fg_miss|punt|blocked_punt|bust|no_score)
+- points_scored (int)
+- created_at, ended_at
+
+OPTIONAL TABLE: drive_outcomes (nice-to-have; implement if it helps, otherwise skip)
+- drive_id (pk/fk)
+- td_type (inner_bull|exact_distance|one_yard_cushion)
+- conversion_type (pat|two|null)
+- conversion_made (bool|null)
+- fg_distance_band (0_29|30_39|40_50|null)
+- punt_type (inner_bull|outer_bull|single_inner|single_outer|double|triple_return|miss_blocked|null)
+- punt_return_yards (int|null)
+- next_start_pos_for_opponent (int|null)
+
+TABLE: dart_throws  (MOST IMPORTANT; one row per dart)
+Identity/links:
+- id (uuid pk)
+- game_id (fk)
+- drive_id (fk)
+- offense_profile_id (fk)  (denormalized for query speed)
+- throw_index (int) 1..4, plus 5 for bonus dart, plus conversion dart
+- phase (offense | field_goal | punt | conversion_pat | conversion_two | bonus_one_yard_cushion)
+
+Raw board input:
+- hit_type (number | outer_bull | inner_bull | miss)
+- number_hit (smallint 1..20 nullable)
+- ring (single_outer | single_inner | double | triple nullable)
+- multiplier (smallint 1|2|3 nullable)
+
+Context snapshots at time of throw:
+- pos_before (int 0..100)
+- pos_after (int 0..100)
+- required_distance_before (int nullable)
+- required_distance_after (int nullable)
+- darts_remaining_before (int)
+- darts_remaining_after (int)
+
+Computed outcomes:
+- yards_awarded (int)
+- points_awarded (int)
+- is_bust (bool)
+- is_td (bool)
+- is_fg_attempt (bool)
+- is_fg_good (bool nullable)
+- is_pat_good (bool nullable)
+- is_two_good (bool nullable)
+- is_punt (bool)
+- is_punt_blocked (bool)
+- punt_next_start_pos (int nullable)
+- punt_return_yards (int nullable)
+
+Trace/debug:
+- rule_path (text) e.g. TD_EXACT, TD_INNER_BULL, FG_MISS_SPOT, PUNT_TRIPLE_RETURN
+- created_at (timestamptz)
+
+OPTIONAL TABLE: game_events (for richer play-by-play; implement if easy)
+- id (uuid pk)
+- game_id (fk)
+- drive_id (fk nullable)
+- event_type (text or enum)
+- message (text)
+- pos_after (int nullable)
+- created_at
+
+INDEXES (must add)
+- drives(game_id, sequence_in_game)
+- drives(game_id, quarter, drive_in_quarter)
+- dart_throws(drive_id, throw_index)
+- dart_throws(offense_profile_id, created_at)
+- dart_throws(game_id, created_at)
+
+================================================================================
+APP CHANGES REQUIRED
+================================================================================
+
+A) Prisma + Postgres Setup
+- Add Postgres connection using env var DATABASE_URL.
+- Add Prisma schema matching above.
+- Run migrations.
+- Add seed script creating:
+  - 4 profiles
+  - 1 ruleset row
+  - 1 completed sample game with at least a few drives and throws
+
+B) Hook persistence into gameplay
+- Every time the user records a dart, write a dart_throws row with:
+  - raw input (hit_type/number/ring)
+  - phase (offense/fg/punt/pat/two/bonus)
+  - pos_before/pos_after and all computed outcome columns
+  - rule_path
+- When a drive ends, write/update the drives row:
+  - end_pos
+  - result
+  - points_scored
+
+C) Stats + UI
+Add or update pages:
+- /profiles (list + key stats)
+- /profiles/[id] (stats dashboard + head-to-head + recent games)
+- /history (list games)
+- /game/[id] (ensure play-by-play can be reconstructed from dart_throws and/or game_events)
+
+Stats queries must compute:
+- Points per drive = avg(points_scored) grouped by offense_profile_id
+- Inner bull TD count = count(dart_throws where is_td=true and hit_type='inner_bull')
+- FG% = makes/attempts from field_goal throws
+- PAT% and 2PT% similarly
+- Win% from games winner_profile_id
+- Head-to-head: for each opponent profile, compute W-L, points for/against
+
+Implement helper functions/services for stats:
+- /src/lib/stats/profileStats.ts
+- /src/lib/stats/headToHead.ts
+
+Prefer server-side data fetching (Next.js Server Components) for stats pages.
+
+D) Backward compatibility
+If the app currently uses SQLite:
+- Either migrate existing data into Postgres (simple best-effort), or
+- Start fresh and document in README. Prefer starting fresh unless migration is trivial.
+
+================================================================================
+DELIVERABLES
+================================================================================
+- Updated Prisma schema + migrations
+- Seed script
+- Updated persistence in gameplay flows (drives + dart_throws)
+- Stats pages working with real queries
+- README updated:
+  - how to run
+  - environment variables
+  - assumptions
+
+Build and commit changes now.

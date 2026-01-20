@@ -1,0 +1,289 @@
+# FOOTBALL (DART GAME)
+
+## All‑in‑One Replit MVP Prompt (Includes Rules Markdown)
+
+---
+
+You are **Replit Agent**. Build a complete MVP web app for a custom dart game called **“Football (Dart Game)”**.
+
+This prompt is **fully self‑contained**. Do not ask follow‑up questions. If ambiguity exists, make a reasonable assumption and document it in the README under **Assumptions**.
+
+---
+
+# TECH STACK
+
+* Next.js (App Router) + TypeScript
+* TailwindCSS
+* SQLite + Prisma
+* No authentication
+* Persistent local **Profiles** (players) stored in DB
+
+---
+
+# MVP MUST INCLUDE
+
+## 1. Profiles (no login)
+
+* Create, edit, list profiles
+* Profile detail page with aggregated stats + head‑to‑head summary
+
+## 2. Rules inside the app
+
+* Create `/content/rules.md` (canonical source of truth)
+* Create `/rules` page that renders the markdown cleanly
+* Display **Rules Version** and **Last Updated** from frontmatter
+
+## 3. New Game Flow
+
+* `/new` page:
+
+  * Select Player 1 and Player 2 from profiles
+  * Inline create profile modal
+  * Coin flip button determines who receives first
+  * Start Game → creates Game + first Drive → routes to `/game/[id]`
+
+## 4. In‑Game Tracker
+
+* `/game/[id]` page:
+
+  * Scoreboard (names, score, quarter, possession)
+  * Field position display (OWN / 50 / OPP)
+  * Dart counter (1–4)
+  * Action buttons (enabled/disabled by rules):
+
+    * Record Dart
+    * Attempt FG
+    * Punt
+  * After TD: PAT vs 2PT chooser
+  * Play‑by‑play feed
+  * Undo last input (recompute state from events)
+  * Automatic drive / quarter transitions
+
+## 5. History
+
+* `/history` lists completed games
+* Clicking a game shows final summary
+
+## 6. Stats (computed)
+
+Profile stats include:
+
+* Games, wins, losses, win %
+* Total points, points per game
+* Drives, points per drive
+* TDs, inner‑bull TDs
+* FG attempts/makes/%
+* PAT attempts/makes/%
+* 2PT attempts/makes/%
+* Head‑to‑head record vs all profiles
+
+---
+
+# AUTHORITATIVE GAME RULES (ENGINE MUST MATCH)
+
+## FIELD MODEL
+
+* Field = 0–100 yards from offense perspective
+* OWN goal = 0, midfield = 50, opponent goal = 100
+* Default drive start = OWN 30
+
+Display:
+
+* pos < 50 → `OWN {pos}`
+* pos == 50 → `50`
+* pos > 50 → `OPP {100-pos}`
+
+Drives are independent unless modified by a **punt**.
+
+---
+
+## DRIVES & QUARTERS
+
+* 4 quarters
+* Each quarter: each player gets 1 drive
+* Each drive: up to 4 darts
+* Drive ends by TD, FG attempt, Punt, or Bust
+* Bust is **not** a turnover
+
+---
+
+## DART SCORING (OFFENSE)
+
+* Single = base number
+* Double = base × 2
+* Triple = base × 3
+* Outer Bull = 25 yards
+* Inner Bull = **automatic touchdown anywhere**
+* Miss = 0 yards
+
+---
+
+## TOUCHDOWNS
+
+A TD is scored if **either**:
+
+1. Inner bull is hit (auto TD), OR
+2. Offense advances exactly to the opponent goal line
+
+Required distance = `100 − driveStartPos`
+
+* driveYards == required → TD
+* driveYards > required → **Bust**
+
+TD = 6 points
+
+---
+
+## CONVERSIONS (1 dart)
+
+After TD, must choose one:
+
+### PAT (1 point)
+
+* Same as 30–39 yd FG
+* Must hit ANY **single triangle** between numbers **5–1**
+
+### 2‑Point Try (2 points)
+
+* Declare “Going for 2”
+* Must hit number **2** in ANY segment
+
+---
+
+## FIELD GOALS
+
+Eligibility: position ≥ 50
+Declared, 1 dart, ends drive
+
+Target bands (based on opponent yard line):
+
+* 0–29: SINGLE 12–18
+* 30–39: SINGLE 5–1
+* 40–50: SINGLE 20
+
+Make = 3, Miss = 0
+
+---
+
+## PUNTING
+
+Eligibility:
+
+* Only on 4th dart
+* Only when position < 50
+* Must be declared
+
+Receiving team start:
+
+* Inner Bull → OWN 5
+* Outer Bull → OWN 10
+* Single (inner ring) → OWN 30
+* Single (outer ring) → OWN 20
+* Any Double → OWN 20
+* Any Triple → Returned punt:
+
+  * Start OWN 20
+  * Return yards = triple point value (base × 3)
+  * Example: T20 → start at OPP 20
+* Miss → Blocked punt:
+
+  * Receiving starts at spot of punt (flip perspective: `100 − puntPos`)
+
+Punts never score points.
+
+---
+
+## OVERTIME
+
+* If tied after regulation
+* Each team guaranteed 1 possession
+* Drives start at OWN 30 unless changed by punt
+* After both teams have had a possession, any score that creates a lead ends the game
+
+---
+
+# ENGINE REQUIREMENTS
+
+Create pure TypeScript engine (no UI logic):
+
+* `/src/lib/engine/types.ts`
+* `/src/lib/engine/engine.ts`
+* `/src/lib/engine/format.ts`
+
+Expose functions:
+
+* createGame
+* startNextDrive
+* getAvailableActions
+* applyOffenseDart
+* applyFieldGoalAttempt
+* applyPuntAttempt
+* chooseConversion
+* applyConversionDart
+* advance
+* undo (replay from events)
+
+Include unit tests for:
+
+* Inner bull TD
+* Outer bull = 25 yards
+* Exact‑distance TD
+* Bust logic
+* Punt outcomes (including triple return + blocked punt)
+* FG bands + single‑only enforcement
+* PAT vs 2PT rules
+
+---
+
+# DATABASE (PRISMA)
+
+Models:
+
+* Profile
+* Game
+* Drive
+* Throw
+* Event
+
+Store `rulesVersion` on each Game.
+
+---
+
+# ROUTES
+
+* `/profiles`
+* `/profiles/[id]`
+* `/new`
+* `/game/[id]`
+* `/history`
+* `/rules`
+
+---
+
+# RULES MARKDOWN (REQUIRED)
+
+Create `/content/rules.md` with **this exact content**:
+
+---
+
+rulesVersion: "0.8"
+lastUpdated: "2025-12-22"
+-------------------------
+
+# FOOTBALL (DART GAME)
+
+A turn‑based dart game that simulates American football using field position, drives, special teams, and scoring decisions.
+
+(Use the same rules text defined above, written for players, not developers. Do not paraphrase.)
+
+---
+
+# DELIVERABLES
+
+* Fully working app
+* Engine + tests
+* Prisma schema + migrations
+* Seed data (at least 4 profiles + 1 completed game)
+* README with run instructions and assumptions
+
+Build everything now.

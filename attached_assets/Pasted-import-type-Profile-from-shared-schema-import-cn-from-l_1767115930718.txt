@@ -1,0 +1,334 @@
+import type { Profile } from "@shared/schema";
+import { cn } from "@/lib/utils";
+import { Bell, ChevronRight, Circle } from "lucide-react";
+
+interface BroadcastHudProps {
+  player1: Profile;
+  player2: Profile;
+  player1Score: number;
+  player2Score: number;
+  possession: number;
+  currentQuarter: number;
+  position: number;
+  dartsUsed: number;
+  isCompleted: boolean;
+  winnerId: string | null;
+}
+
+export default function BroadcastHud({
+  player1,
+  player2,
+  player1Score,
+  player2Score,
+  possession,
+  currentQuarter,
+  position,
+  dartsUsed,
+  isCompleted,
+  winnerId,
+}: BroadcastHudProps) {
+  const currentPlayer = possession === 1 ? player1 : player2;
+  const dartDisplay = dartsUsed + 1;
+
+  // ESPN-ish: show "1ST & 10" style. You can change this to match your rules.
+  const downLabel = getOrdinal(dartDisplay);
+  const yardsToGo = 10; // placeholder – make this real if you track it
+  const downAndDistance = `${downLabel} & ${yardsToGo}`;
+
+  // Clock is not in your props; keeping the “11:10” feel as a static placeholder.
+  // If you track game time, pass it in and replace this.
+  const clock = "11:10";
+
+  const ballOnLabel = `@ ${formatFieldPosition(position)}`;
+
+  // First down line: simplest version is “+10 yards”, capped.
+  const firstDownPosition = Math.min(position + 10, 100);
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl shadow-2xl border border-white/10">
+      {/* subtle vignette + noise */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1200px_500px_at_50%_-20%,rgba(99,102,241,0.20),transparent_60%),radial-gradient(900px_500px_at_50%_120%,rgba(245,158,11,0.12),transparent_60%)]" />
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E\")",
+        }}
+      />
+
+      {/* TOP HUD BAR (glass) */}
+      <div className="relative px-4 py-2 bg-white/5 backdrop-blur-md border-b border-white/10">
+        <div className="flex items-center justify-between gap-3">
+          {/* Left cluster */}
+          <div className="flex items-center gap-2 min-w-0">
+            {!isCompleted && (
+              <div className="flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wide">
+                <Circle className="h-2 w-2 fill-current animate-pulse" />
+                LIVE
+              </div>
+            )}
+            <span className="text-[11px] font-semibold text-white/70">
+              Q{currentQuarter > 4 ? "OT" : currentQuarter} {clock}
+            </span>
+            <span className="text-white/25">•</span>
+            <span className="text-[11px] font-semibold text-white/80">
+              {downAndDistance}
+            </span>
+            <span className="text-white/25">•</span>
+            <span className="text-[11px] font-semibold text-white/70">
+              {ballOnLabel}
+            </span>
+          </div>
+
+          {/* Right icon */}
+          <button
+            type="button"
+            className="inline-flex items-center justify-center rounded-md p-1.5 text-white/60 hover:text-white hover:bg-white/10 transition"
+            aria-label="Notifications"
+          >
+            <Bell className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Play line (like ESPN ticker text) */}
+        <div className="mt-1 text-[12px] leading-snug text-white/85">
+          <span className="font-semibold">{currentPlayer.name}</span>{" "}
+          <span className="text-white/70">
+            is throwing dart {dartDisplay}… {/* replace with real play text */}
+          </span>
+        </div>
+      </div>
+
+      {/* FIELD PANEL */}
+      <div className="relative">
+        <div className="relative bg-[#0a0f1f]">
+          <FieldHudGraphic
+            position={position}
+            firstDownPosition={firstDownPosition}
+            possession={possession}
+            player1={player1}
+            player2={player2}
+          />
+          {/* Center overlay (like "1ST & 10 @ LAR 30") */}
+          {!isCompleted && (
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 translate-y-[10px] flex items-center gap-2 rounded-md bg-black/40 backdrop-blur px-3 py-1 border border-white/10">
+              <span className="text-[12px] font-black tracking-wide text-white">
+                {downAndDistance}
+              </span>
+              <span className="text-white/30">•</span>
+              <span className="text-[12px] font-semibold text-white/80">
+                {formatFieldPositionShort(position)}
+              </span>
+              <div className="flex items-center gap-0 opacity-50 ml-2">
+                <ChevronRight className="h-5 w-5 text-white" />
+                <ChevronRight className="h-5 w-5 text-white -ml-3" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SCORE STRIP */}
+        <div className="relative px-5 py-4 bg-white/5 backdrop-blur-md border-t border-white/10">
+          <div className="flex items-center justify-between">
+            {/* Player 1 */}
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={cn(
+                  "h-10 w-1.5 rounded-full",
+                  !isCompleted && possession === 1
+                    ? "bg-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.45)]"
+                    : "bg-white/10"
+                )}
+              />
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    "text-[14px] font-semibold truncate",
+                    winnerId === player1.id ? "text-amber-400" : "text-white/90"
+                  )}
+                >
+                  {player1.name}
+                </div>
+                <div className="text-[34px] leading-none font-black text-white tracking-tight">
+                  {player1Score}
+                </div>
+              </div>
+            </div>
+
+            {/* Center meta */}
+            <div className="flex flex-col items-center">
+              <div className="text-[14px] font-bold text-white">Q{currentQuarter > 4 ? "OT" : currentQuarter}</div>
+              <div className="text-[12px] text-white/70">{clock}</div>
+              <div className="mt-1 text-[10px] font-semibold tracking-widest text-white/40 uppercase">
+                Football Darts
+              </div>
+            </div>
+
+            {/* Player 2 */}
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="min-w-0 text-right">
+                <div
+                  className={cn(
+                    "text-[14px] font-semibold truncate",
+                    winnerId === player2.id ? "text-amber-400" : "text-white/90"
+                  )}
+                >
+                  {player2.name}
+                </div>
+                <div className="text-[34px] leading-none font-black text-white tracking-tight">
+                  {player2Score}
+                </div>
+              </div>
+              <div
+                className={cn(
+                  "h-10 w-1.5 rounded-full",
+                  !isCompleted && possession === 2
+                    ? "bg-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.45)]"
+                    : "bg-white/10"
+                )}
+              />
+            </div>
+          </div>
+
+          {/* Dart pips */}
+          {!isCompleted && (
+            <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-center gap-2">
+              {[1, 2, 3, 4].map((n) => (
+                <div
+                  key={n}
+                  className={cn(
+                    "h-2.5 w-2.5 rounded-full",
+                    n <= dartsUsed
+                      ? "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]"
+                      : "bg-white/15 border border-white/20"
+                  )}
+                />
+              ))}
+              <span className="ml-2 text-[10px] text-white/45">Darts Used</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** ESPN-ish field graphic (SVG) */
+function FieldHudGraphic({
+  position,
+  firstDownPosition,
+  possession,
+  player1,
+  player2,
+}: {
+  position: number;
+  firstDownPosition: number;
+  possession: number;
+  player1: Profile;
+  player2: Profile;
+}) {
+  const pad = 0.12; // left/right padding as % of width inside the “field”
+  const x = (p: number) => `${(pad + (p / 100) * (1 - pad * 2)) * 100}%`;
+
+  const teamLeft = player1.name.slice(0, 2).toUpperCase();
+  const teamRight = player2.name.slice(0, 2).toUpperCase();
+  const markerText = possession === 1 ? teamLeft : teamRight;
+
+  return (
+    <div className="relative h-[150px] w-full overflow-hidden">
+      {/* blue/red split like broadcast */}
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(59,130,246,0.15)_0%,rgba(15,23,42,0.9)_35%,rgba(15,23,42,0.9)_65%,rgba(239,68,68,0.15)_100%)]" />
+      {/* field stripes */}
+      <div className="absolute inset-0 opacity-40">
+        <div
+          className="h-full w-full"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 2px, transparent 2px, transparent 34px)",
+          }}
+        />
+      </div>
+      {/* endzones */}
+      <div className="absolute left-0 top-0 bottom-0 w-[12%] bg-[linear-gradient(90deg,rgba(239,68,68,0.30),transparent)]" />
+      <div className="absolute right-0 top-0 bottom-0 w-[12%] bg-[linear-gradient(270deg,rgba(59,130,246,0.30),transparent)]" />
+
+      {/* yard numbers */}
+      <div className="absolute left-0 right-0 bottom-2 flex justify-around px-[12%]">
+        <span className="text-[12px] font-mono font-black text-white/45">20</span>
+        <span className="text-[12px] font-mono font-black text-white/60">50</span>
+        <span className="text-[12px] font-mono font-black text-white/45">20</span>
+      </div>
+
+      {/* LOS + First Down */}
+      <div className="absolute top-0 bottom-0 w-px bg-white/35" style={{ left: x(position) }} />
+      <div
+        className="absolute top-0 bottom-0 w-px"
+        style={{
+          left: x(firstDownPosition),
+          background:
+            "linear-gradient(180deg, rgba(168,85,247,0.0), rgba(168,85,247,0.9), rgba(168,85,247,0.0))",
+          boxShadow: "0 0 14px rgba(168,85,247,0.55)",
+        }}
+      />
+
+      {/* play path (optional cosmetic curve) */}
+      <svg className="absolute inset-0" viewBox="0 0 1000 200" preserveAspectRatio="none">
+        <defs>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* simple curved line centered-ish */}
+        <path
+          d="M 420 120 C 520 60, 560 60, 640 120"
+          fill="none"
+          stroke="rgba(168,85,247,0.9)"
+          strokeWidth="4"
+          filter="url(#glow)"
+          opacity="0.9"
+        />
+        <circle cx="420" cy="120" r="6" fill="white" opacity="0.9" />
+      </svg>
+
+      {/* ball/marker chip */}
+      <div className="absolute top-[48%] -translate-y-1/2" style={{ left: x(position) }}>
+        <div className="relative -translate-x-1/2">
+          {/* glow */}
+          <div
+            className="absolute inset-0 rounded-full blur-xl scale-[1.8]"
+            style={{ background: "radial-gradient(circle, rgba(251,191,36,0.65), transparent 60%)" }}
+          />
+          {/* chip */}
+          <div className="relative flex items-center justify-center h-8 w-8 rounded-full bg-[#b91c1c] border border-white/25 shadow-[0_0_18px_rgba(0,0,0,0.35)]">
+            <span className="text-[10px] font-black text-white">{markerText}</span>
+          </div>
+          {/* pointer */}
+          <div className="mx-auto mt-1 h-0 w-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white/70" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatFieldPosition(position: number): string {
+  if (position < 50) return `OWN ${position}`;
+  if (position === 50) return "50";
+  return `OPP ${100 - position}`;
+}
+
+function formatFieldPositionShort(position: number): string {
+  // “@ LAR 30” style: you can swap LAR with a team code later
+  if (position < 50) return `OWN ${position}`;
+  if (position === 50) return "50";
+  return `OPP ${100 - position}`;
+}
+
+function getOrdinal(n: number): string {
+  const ordinals = ["1ST", "2ND", "3RD", "4TH"];
+  return ordinals[n - 1] || `${n}TH`;
+}
