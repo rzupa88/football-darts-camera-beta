@@ -335,7 +335,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       warnings.push("BETA app is NOT using a beta database");
     }
     if (!appName.includes("beta") && dbName && dbName.includes("beta")) {
-      warnings.push("PROD app is pointing at a beta database");
+      warnings.push("⚠️PROD app is pointing at a beta database");
     }
 
     res.json({

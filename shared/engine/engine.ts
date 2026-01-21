@@ -1,72 +1,27 @@
+// shared/engine/engine.ts
 // Pure TypeScript game engine - no UI logic
 import {
   DartResult,
   DartHit,
-  Multiplier,
   GameStateEngine,
   DriveState,
-  GameEventEngine,
-  AvailableActionsEngine,
   PuntResult,
   FGTarget,
   DriveResult,
-  FG_EASY_SEGMENTS,
 } from "./types";
+
+import { generateId } from "./ids";
+import { calculateDartYards, formatDartResult } from "./dart";
+import { formatFieldPosition } from "./format";
+import { getAvailableActions } from "./actions";
+import { createGame } from "./lifecycle";
+
 
 // Game constants
 const DRIVES_PER_PLAYER_PER_QUARTER = 2;
 
-// Utility to generate IDs
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 15);
-}
-
-// Calculate yards from a dart throw
-export function calculateDartYards(
-  segment: number,
-  multiplier: Multiplier,
-): DartResult {
-  const isInnerBull = multiplier === "inner_bull";
-  const isOuterBull = multiplier === "outer_bull";
-
-  let yards = 0;
-
-  if (multiplier === "miss") {
-    yards = 0;
-  } else if (isInnerBull) {
-    yards = 50; // Auto TD marker - handled separately
-  } else if (isOuterBull) {
-    yards = 25;
-  } else {
-    const baseValue = segment;
-    switch (multiplier) {
-      case "single_inner":
-      case "single_outer":
-        yards = baseValue;
-        break;
-      case "double":
-        yards = baseValue * 2;
-        break;
-      case "triple":
-        yards = baseValue * 3;
-        break;
-    }
-  }
-
-  return {
-    segment,
-    multiplier,
-    yards,
-    isInnerBull,
-    isOuterBull,
-  };
-}
-
 // Canonical entrypoint for raw dart hits (manual now, camera later)
-export function applyDartHit(
-  game: GameStateEngine,
-  hit: DartHit,
-): GameStateEngine {
+export function applyDartHit(game: GameStateEngine, hit: DartHit): GameStateEngine {
   const dartResult = calculateDartYards(hit.segment, hit.multiplier);
 
   // If we're awaiting a PAT/2pt attempt, route here
@@ -83,59 +38,12 @@ export function applyDartHit(
   return applyOffenseDart(game, dartResult);
 }
 
-// Format field position for display
-export function formatFieldPosition(position: number): string {
-  if (position < 50) {
-    return `OWN ${position}`;
-  } else if (position === 50) {
-    return "50";
-  } else {
-    return `OPP ${100 - position}`;
-  }
-}
+// Re-export formatters for other modules (keeps imports stable)
+export { formatFieldPosition, formatDartResult };
+export { calculateDartYards } from "./dart";
+export { getAvailableActions };
+export { createGame };
 
-// Create a new game
-export function createGame(
-  player1Id: string,
-  player2Id: string,
-  firstPossession: 1 | 2,
-): GameStateEngine {
-  const gameId = generateId();
-
-  const game: GameStateEngine = {
-    id: gameId,
-    player1Id,
-    player2Id,
-    player1Score: 0,
-    player2Score: 0,
-    currentQuarter: 1,
-    possession: firstPossession,
-    firstPossession, // Track who started Q1 for halftime flip
-    status: "active",
-    winnerId: null,
-    currentDrive: null,
-    drives: [],
-    events: [],
-    awaitingConversion: false,
-    conversionType: null,
-    lastTdPlayerId: null,
-    overtimePossessions: { player1: 0, player2: 0 },
-    otFirstPossession: null,
-  };
-
-  // Add game start event
-  game.events.push({
-    id: generateId(),
-    type: "game_start",
-    playerId: firstPossession === 1 ? player1Id : player2Id,
-    driveId: null,
-    data: { firstPossession },
-    description: `Game started. ${firstPossession === 1 ? "Player 1" : "Player 2"} receives first.`,
-    timestamp: Date.now(),
-  });
-
-  return game;
-}
 
 // Start a new drive
 export function startNextDrive(
@@ -181,74 +89,6 @@ export function startNextDrive(
 
   return updatedGame;
 }
-
-// Get available actions based on current game state
-export function getAvailableActions(
-  game: GameStateEngine,
-): AvailableActionsEngine {
-  if (game.status === "completed") {
-    return {
-      canThrowDart: false,
-      canAttemptFG: false,
-      canPunt: false,
-      canChooseConversion: false,
-      canUseBonusDart: false,
-    };
-  }
-
-  if (game.awaitingConversion) {
-    return {
-      canThrowDart: false,
-      canAttemptFG: false,
-      canPunt: false,
-      canChooseConversion: true,
-      canUseBonusDart: false,
-    };
-  }
-
-  if (!game.currentDrive) {
-    return {
-      canThrowDart: false,
-      canAttemptFG: false,
-      canPunt: false,
-      canChooseConversion: false,
-      canUseBonusDart: false,
-    };
-  }
-
-  const drive = game.currentDrive;
-  const position = drive.currentPosition;
-  const dartCount = drive.dartCount;
-
-  // 4th-dart cushion: if awaiting bonus dart, only that option
-  if (drive.awaitingBonusDart) {
-    return {
-      canThrowDart: false,
-      canAttemptFG: false,
-      canPunt: false,
-      canChooseConversion: false,
-      canUseBonusDart: true,
-    };
-  }
-
-  // Can always throw if under 4 darts
-  const canThrowDart = dartCount < 4;
-
-  // Can attempt FG if position >= 50 (in opponent territory or at midfield)
-  const canAttemptFG = position >= 50;
-
-  // Can only punt on 4th dart and position < 50
-  const canPunt = dartCount === 3 && position < 50;
-
-  return {
-    canThrowDart,
-    canAttemptFG,
-    canPunt,
-    canChooseConversion: false,
-    canUseBonusDart: false,
-  };
-}
-
 // Apply an offensive dart throw
 export function applyOffenseDart(
   game: GameStateEngine,
@@ -1184,22 +1024,3 @@ export function undo(game: GameStateEngine): GameStateEngine {
     events,
   };
 }
-
-// Format dart result for display
-function formatDartResult(dart: DartResult): string {
-  if (dart.multiplier === "miss") return "Miss";
-  if (dart.isInnerBull) return "Inner Bull";
-  if (dart.isOuterBull) return "Outer Bull (25)";
-
-  const prefix =
-    dart.multiplier === "triple"
-      ? "T"
-      : dart.multiplier === "double"
-        ? "D"
-        : "S";
-
-  return `${prefix}${dart.segment}`;
-}
-
-// Export format function for use elsewhere
-export { formatDartResult };
