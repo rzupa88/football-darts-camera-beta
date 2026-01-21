@@ -2,6 +2,27 @@
 
 export type Multiplier = "single_inner" | "single_outer" | "double" | "triple" | "inner_bull" | "outer_bull" | "miss";
 
+export type DartHitSource = "manual" | "camera";
+
+export interface DartHit {
+  /** Raw board read (manual click or camera detection) */
+  segment: number; // 0-20, 25 for bull
+  multiplier: Multiplier;
+  source: DartHitSource;
+  timestamp: number;
+
+  /** Camera-only: confidence 0..1 */
+  confidence?: number;
+
+  /** Optional raw details for debugging/replay */
+  raw?: {
+    x?: number;
+    y?: number;
+    frameId?: string;
+  };
+}
+
+
 export interface DartResult {
   segment: number; // 0-20, 25 for bull
   multiplier: Multiplier;

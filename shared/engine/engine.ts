@@ -1,6 +1,7 @@
 // Pure TypeScript game engine - no UI logic
 import {
   DartResult,
+  DartHit,
   Multiplier,
   GameStateEngine,
   DriveState,
@@ -59,6 +60,27 @@ export function calculateDartYards(
     isInnerBull,
     isOuterBull,
   };
+}
+
+// Canonical entrypoint for raw dart hits (manual now, camera later)
+export function applyDartHit(
+  game: GameStateEngine,
+  hit: DartHit,
+): GameStateEngine {
+  const dartResult = calculateDartYards(hit.segment, hit.multiplier);
+
+  // If we're awaiting a PAT/2pt attempt, route here
+  if (game.awaitingConversion) {
+    return applyConversionDart(game, dartResult);
+  }
+
+  // If we're awaiting a bonus dart (4th-dart cushion rule), route here
+  if (game.currentDrive?.awaitingBonusDart) {
+    return applyBonusDart(game, dartResult);
+  }
+
+  // Default: offensive dart throw during a drive
+  return applyOffenseDart(game, dartResult);
 }
 
 // Format field position for display
