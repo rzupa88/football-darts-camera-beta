@@ -2,7 +2,7 @@
 
 export type Multiplier = "single_inner" | "single_outer" | "double" | "triple" | "inner_bull" | "outer_bull" | "miss";
 
-export type DartHitSource = "manual" | "camera";
+export type DartHitSource = "click" | "manual" | "camera";
 
 export interface DartHit {
   /** Raw board read (manual click or camera detection) */
