@@ -120,7 +120,7 @@ export function applyOffenseDart(
       pointsScored: 0,
     };
 
-    let updatedGame = {
+    const updatedGame = {
       ...game,
       currentDrive: updatedDrive,
       drives: game.drives.map((d) => (d.id === drive.id ? updatedDrive : d)),
@@ -219,7 +219,7 @@ export function applyOffenseDart(
       pointsScored: 0,
     };
 
-    let updatedGame = {
+    const updatedGame = {
       ...game,
       currentDrive: updatedDrive,
       drives: game.drives.map((d) => (d.id === drive.id ? updatedDrive : d)),
@@ -258,7 +258,7 @@ export function applyOffenseDart(
     currentPosition: newPosition,
   };
 
-  let updatedGame = {
+  const updatedGame = {
     ...game,
     currentDrive: updatedDrive,
     drives: game.drives.map((d) => (d.id === drive.id ? updatedDrive : d)),
@@ -402,7 +402,7 @@ export function applyBonusDart(
       pointsScored: 0,
     };
 
-    let updatedGame = {
+    const updatedGame = {
       ...game,
       currentDrive: updatedDrive,
       drives: game.drives.map((d) => (d.id === drive.id ? updatedDrive : d)),
@@ -606,7 +606,7 @@ export function applyPuntAttempt(
     pointsScored: 0,
   };
 
-  let updatedGame = {
+  const updatedGame = {
     ...game,
     currentDrive: updatedDrive,
     drives: game.drives.map((d) => (d.id === drive.id ? updatedDrive : d)),
@@ -734,7 +734,7 @@ function endDrive(game: GameStateEngine): GameStateEngine {
 
   const drive = game.currentDrive;
 
-  let updatedGame: GameStateEngine = {
+  const updatedGame: GameStateEngine = {
     ...game,
     currentDrive: null,
     events: [
@@ -805,7 +805,7 @@ function endDriveWithPuntPosition(
   game: GameStateEngine,
   nextStartPosition: number,
 ): GameStateEngine {
-  let updatedGame = endDrive(game);
+  const updatedGame = endDrive(game);
 
   // Store the punt position for the next drive
   (updatedGame as any)._nextDriveStartPosition = nextStartPosition;
@@ -822,7 +822,7 @@ function endDriveWithInterception(
   // e.g., if intercepted at position 60 (OPP 40), opponent starts at their OWN 40
   const opponentStartPosition = 100 - interceptionPosition;
 
-  let updatedGame = endDrive(game);
+  const updatedGame = endDrive(game);
 
   // Store the interception position for the next drive
   (updatedGame as any)._nextDriveStartPosition = opponentStartPosition;
@@ -834,7 +834,7 @@ function endDriveWithInterception(
 function endQuarter(game: GameStateEngine): GameStateEngine {
   const nextQuarter = game.currentQuarter + 1;
 
-  let updatedGame: GameStateEngine = {
+  const updatedGame: GameStateEngine = {
     ...game,
     events: [
       ...game.events,
