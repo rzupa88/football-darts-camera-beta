@@ -320,7 +320,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     // Optional git info (safe if unavailable)
-    let git = { branch: null as string | null, sha: null as string | null };
+    const git = { branch: null as string | null, sha: null as string | null };
     try {
       const { execSync } = await import("child_process");
       git.branch = execSync("git rev-parse --abbrev-ref HEAD").toString().trim();

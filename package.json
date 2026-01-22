@@ -10,7 +10,9 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "test": "vitest --config vitest.config.ts run",
-"test:watch": "vitest --config vitest.config.ts"
+    "test:watch": "vitest --config vitest.config.ts",
+    "lint": "eslint \"client/src/**/*.{ts,tsx}\" \"server/**/*.{ts,tsx}\" \"shared/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"client/src/**/*.{ts,tsx}\" \"server/**/*.{ts,tsx}\" \"shared/**/*.{ts,tsx}\" --fix"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -79,6 +81,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
@@ -97,10 +100,14 @@
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.25.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^17.0.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
+    "typescript-eslint": "^8.53.1",
     "vite": "^7.3.0",
     "vitest": "^4.0.17"
   },
