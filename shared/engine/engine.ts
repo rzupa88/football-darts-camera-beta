@@ -15,7 +15,7 @@ import { calculateDartYards, formatDartResult } from "./dart";
 import { formatFieldPosition } from "./format";
 import { getAvailableActions } from "./actions";
 import { createGame } from "./lifecycle";
-
+import { startNextDrive } from "./drive/startDrive";
 
 // Game constants
 const DRIVES_PER_PLAYER_PER_QUARTER = 2;
@@ -43,52 +43,9 @@ export { formatFieldPosition, formatDartResult };
 export { calculateDartYards } from "./dart";
 export { getAvailableActions };
 export { createGame };
+export { startNextDrive } from "./drive/startDrive";
 
 
-// Start a new drive
-export function startNextDrive(
-  game: GameStateEngine,
-  startPosition: number = 30,
-): GameStateEngine {
-  const currentPlayerId =
-    game.possession === 1 ? game.player1Id : game.player2Id;
-
-  const drive: DriveState = {
-    id: generateId(),
-    playerId: currentPlayerId,
-    quarter: game.currentQuarter,
-    startPosition,
-    currentPosition: startPosition,
-    dartCount: 0,
-    yardsGained: 0,
-    result: null,
-    pointsScored: 0,
-    awaitingBonusDart: false,
-    usedBonusDart: false,
-  };
-
-  const updatedGame = {
-    ...game,
-    currentDrive: drive,
-    drives: [...game.drives, drive],
-  };
-
-  // Add drive start event
-  updatedGame.events = [
-    ...updatedGame.events,
-    {
-      id: generateId(),
-      type: "drive_start",
-      playerId: currentPlayerId,
-      driveId: drive.id,
-      data: { startPosition, quarter: game.currentQuarter },
-      description: `Drive started at ${formatFieldPosition(startPosition)}`,
-      timestamp: Date.now(),
-    },
-  ];
-
-  return updatedGame;
-}
 // Apply an offensive dart throw
 export function applyOffenseDart(
   game: GameStateEngine,
