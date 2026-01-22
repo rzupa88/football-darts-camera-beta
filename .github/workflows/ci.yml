@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test_build:
-    name: Typecheck, Test, Build
+  verify:
+    name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -24,15 +24,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "npm"
+          cache: npm
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci
 
       - name: Typecheck
         run: npm run check
 
-      - name: Unit tests
+      - name: Test
+        env:
+          NODE_ENV: test
         run: npm test
 
       - name: Build
