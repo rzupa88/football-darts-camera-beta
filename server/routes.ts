@@ -1,7 +1,7 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
+import type { Server } from "http";
 import { storage } from "./storage";
-import { insertProfileSchema, insertGameSchema, type InsertDartThrow } from "@shared/schema";
+import { insertGameSchema, type InsertDartThrow } from "@shared/schema";
 import {
   calculateDartYards,
   formatFieldPosition,
@@ -12,6 +12,10 @@ import {
 import type { Multiplier, DartResult } from "@shared/engine/types";
 import { z } from "zod";
 import { getMatchupLine } from "./odds";
+import { registerHealthRoutes } from "./routes/health";
+import { registerProfileRoutes } from "./routes/profiles";
+
+
 
 /**
  * Camera-ready “hit” contract.
@@ -203,159 +207,9 @@ async function applyDartHitToGame(args: {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  // ============ PROFILES ============
-
-  app.get("/api/profiles", async (req, res) => {
-    try {
-      const profiles = await storage.getProfiles();
-      res.json(profiles);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch profiles" });
-    }
-  });
-
-  app.get("/api/profiles/:id", async (req, res) => {
-    try {
-      const profile = await storage.getProfile(req.params.id);
-      if (!profile) {
-        return res.status(404).json({ error: "Profile not found" });
-      }
-      res.json(profile);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch profile" });
-    }
-  });
-
-  app.post("/api/profiles", async (req, res) => {
-    try {
-      const parsed = insertProfileSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ error: "Invalid profile data" });
-      }
-      const profile = await storage.createProfile(parsed.data);
-      res.status(201).json(profile);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to create profile" });
-    }
-  });
-
-  app.patch("/api/profiles/:id", async (req, res) => {
-    try {
-      const profile = await storage.updateProfile(req.params.id, req.body);
-      if (!profile) {
-        return res.status(404).json({ error: "Profile not found" });
-      }
-      res.json(profile);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update profile" });
-    }
-  });
-
-  app.get("/api/profiles/:id/stats", async (req, res) => {
-    try {
-      const stats = await storage.getProfileStats(req.params.id);
-      res.json(stats);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch stats" });
-    }
-  });
-
-  app.get("/api/profiles/:id/head-to-head", async (req, res) => {
-    try {
-      const h2h = await storage.getProfileHeadToHead(req.params.id);
-      res.json(h2h);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch head-to-head" });
-    }
-  });
-
-  app.get("/api/profiles/:id/games", async (req, res) => {
-    try {
-      const games = await storage.getProfileGames(req.params.id);
-      res.json(games);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch games" });
-    }
-  });
-
-  // Heat map endpoint
-  app.get("/api/profiles/:id/heat-map", async (req, res) => {
-    try {
-      const { gameId, opponentId, phase, dateFrom, dateTo } = req.query;
-
-      const heatMapData = await storage.getHeatMapData({
-        profileId: req.params.id,
-        gameId: gameId as string | undefined,
-        opponentId: opponentId as string | undefined,
-        phase: phase as string | undefined,
-        dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
-        dateTo: dateTo ? new Date(dateTo as string) : undefined,
-      });
-
-      res.json(heatMapData);
-    } catch (error) {
-      console.error("Error fetching heat map:", error);
-      res.status(500).json({ error: "Failed to fetch heat map data" });
-    }
-  });
-
-  app.get("/api/health", async (_req, res) => {
-  try {
-    const appName = process.env.APP_NAME ?? "unknown";
-    const nodeEnv = process.env.NODE_ENV ?? "unknown";
-    const port = process.env.PORT ? Number(process.env.PORT) : null;
-
-    // Parse DATABASE_URL safely
-    let dbName: string | null = null;
-    let dbHost: string | null = null;
-
-    if (process.env.DATABASE_URL) {
-      try {
-        const url = new URL(process.env.DATABASE_URL);
-        dbName = url.pathname.replace("/", "");
-        dbHost = url.hostname;
-      } catch {
-        dbName = "invalid DATABASE_URL";
-      }
-    }
-
-    // Optional git info (safe if unavailable)
-    const git = { branch: null as string | null, sha: null as string | null };
-    try {
-      const { execSync } = await import("child_process");
-      git.branch = execSync("git rev-parse --abbrev-ref HEAD").toString().trim();
-      git.sha = execSync("git rev-parse --short HEAD").toString().trim();
-    } catch {
-      // ignore — git not available (Pi prod, etc.)
-    }
-
-    // Guardrail warning
-    const warnings: string[] = [];
-    if (appName.includes("beta") && dbName && !dbName.includes("beta")) {
-      warnings.push("BETA app is NOT using a beta database");
-    }
-    if (!appName.includes("beta") && dbName && dbName.includes("beta")) {
-      warnings.push("⚠️PROD app is pointing at a beta database");
-    }
-
-    res.json({
-      app: appName,
-      env: nodeEnv,
-      port,
-      db: dbName,
-      databaseHost: dbHost,
-      git,
-      warnings,
-      time: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({
-      status: "error",
-      message: "health check failed",
-    });
-  }
-});
-
+ 
+  registerHealthRoutes(app);
+  registerProfileRoutes(app);
 
   // ============ MATCHUP LINES (ODDS) ============
 
