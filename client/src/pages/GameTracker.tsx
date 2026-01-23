@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -52,8 +52,38 @@ interface GameStateResponse {
 
 export type DriveDotState = "points" | "empty" | "current" | "unused";
 
-type DartSegment = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 25;
-type DartMultiplier = "single_inner" | "single_outer" | "double" | "triple" | "inner_bull" | "outer_bull" | "miss";
+type DartSegment =
+  | 0
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 25;
+
+type DartMultiplier =
+  | "single_inner"
+  | "single_outer"
+  | "double"
+  | "triple"
+  | "inner_bull"
+  | "outer_bull"
+  | "miss";
 
 type ActionMode = "offense" | "fg" | "punt" | "pat" | "two_point" | "bonus" | null;
 
@@ -73,11 +103,20 @@ export default function GameTracker() {
   const [popup, setPopup] = useState<PopupState>({ type: null, player: null, message: "" });
   const [otCoinFlipWinner, setOtCoinFlipWinner] = useState<1 | 2 | null>(null);
   const [isOtFlipping, setIsOtFlipping] = useState(false);
+
   const bustSoundRef = useRef<HTMLAudioElement | null>(null);
-  
-  if (!bustSoundRef.current) {
+
+  useEffect(() => {
     bustSoundRef.current = new Audio(bustSoundUrl);
-  }
+  }, []);
+
+  const gameStateKey = ["gameState", id] as const;
+
+  const invalidateGameState = useCallback(async () => {
+    if (!id) return;
+    await queryClient.invalidateQueries({ queryKey: gameStateKey });
+    await queryClient.refetchQueries({ queryKey: gameStateKey });
+  }, [id, gameStateKey]);
 
   const handleOtCoinFlip = () => {
     setIsOtFlipping(true);
@@ -96,18 +135,28 @@ export default function GameTracker() {
     setPopup({ type: null, player: null, message: "" });
   }, []);
 
-  const { data: gameState, isLoading, refetch } = useQuery<GameStateResponse>({
-    queryKey: ["/api/games", id, "state"],
+  const { data: gameState, isLoading } = useQuery<GameStateResponse>({
+    queryKey: gameStateKey,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/games/${id}/state`);
+      return res.json();
+    },
+    enabled: !!id,
   });
+
+  const resetSelection = () => {
+    setSelectedSegment(null);
+    setSelectedMultiplier(null);
+  };
 
   const throwDartMutation = useMutation({
     mutationFn: async (data: { segment: number; multiplier: string; action: string }) => {
       const res = await apiRequest("POST", `/api/games/${id}/action`, data);
-      return res.json() as Promise<{ 
-        success?: boolean; 
-        touchdown?: boolean; 
-        bust?: boolean; 
-        interception?: boolean; 
+      return res.json() as Promise<{
+        success?: boolean;
+        touchdown?: boolean;
+        bust?: boolean;
+        interception?: boolean;
         safety?: boolean;
         fgMade?: boolean;
         fgMissed?: boolean;
@@ -118,14 +167,13 @@ export default function GameTracker() {
         turnover?: boolean;
       }>;
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async (data) => {
+      await invalidateGameState();
       resetSelection();
-      
+
       if (!gameState) return;
       const currentPlayer = gameState.game.possession === 1 ? gameState.player1 : gameState.player2;
-      
+
       if (data.touchdown) {
         showPopup("celebration", currentPlayer, "TOUCHDOWN!");
       } else if (data.bust) {
@@ -167,9 +215,8 @@ export default function GameTracker() {
     mutationFn: async (startPosition: number = 30) => {
       return apiRequest("POST", `/api/games/${id}/start-drive`, { startPosition });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async () => {
+      await invalidateGameState();
       setActionMode("offense");
     },
     onError: () => {
@@ -185,9 +232,8 @@ export default function GameTracker() {
     mutationFn: async (type: "pat" | "two_point") => {
       return apiRequest("POST", `/api/games/${id}/conversion`, { type });
     },
-    onSuccess: (_, type) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async (_, type) => {
+      await invalidateGameState();
       setActionMode(type === "pat" ? "pat" : "two_point");
     },
   });
@@ -196,9 +242,8 @@ export default function GameTracker() {
     mutationFn: async () => {
       return apiRequest("POST", `/api/games/${id}/undo`, {});
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async () => {
+      await invalidateGameState();
       toast({ title: "Action undone" });
       resetSelection();
     },
@@ -208,9 +253,8 @@ export default function GameTracker() {
     mutationFn: async (data: { segment: number; multiplier: string }) => {
       return apiRequest("POST", `/api/games/${id}/bonus-dart`, data);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async () => {
+      await invalidateGameState();
       resetSelection();
     },
     onError: () => {
@@ -226,9 +270,8 @@ export default function GameTracker() {
     mutationFn: async ({ winner, choice }: { winner: 1 | 2; choice: "receive" | "defer" }) => {
       return apiRequest("POST", `/api/games/${id}/ot-coin-flip`, { winner, choice });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/games", id, "state"] });
-      refetch();
+    onSuccess: async () => {
+      await invalidateGameState();
       setOtCoinFlipWinner(null);
       toast({ title: "Overtime coin flip complete!" });
     },
@@ -240,11 +283,6 @@ export default function GameTracker() {
       });
     },
   });
-
-  const resetSelection = () => {
-    setSelectedSegment(null);
-    setSelectedMultiplier(null);
-  };
 
   const handleDartboardSelect = (segment: DartSegment, multiplier: DartMultiplier) => {
     setSelectedSegment(segment);
@@ -268,6 +306,7 @@ export default function GameTracker() {
         two_point: "conversion",
         bonus: "dart",
       };
+
       throwDartMutation.mutate({
         segment: selectedSegment,
         multiplier: selectedMultiplier,
@@ -306,18 +345,37 @@ export default function GameTracker() {
     );
   }
 
-  const { game, currentDrive, events, drives, player1, player2, availableActions, awaitingConversion, awaitingConversionAttempt, pendingConversionType, awaitingBonusDart, pendingStartPosition } = gameState;
+  const {
+    game,
+    currentDrive,
+    events,
+    drives,
+    player1,
+    player2,
+    availableActions,
+    awaitingConversion,
+    awaitingConversionAttempt,
+    pendingConversionType,
+    awaitingBonusDart,
+    pendingStartPosition,
+  } = gameState;
+
   const isCompleted = game.status === "completed";
   const isAwaitingOTCoinFlip = game.status === "awaiting_ot_coin_flip";
   const currentPlayer = game.possession === 1 ? player1 : player2;
 
-  const needsToStartDrive = !isCompleted && !isAwaitingOTCoinFlip && !currentDrive && !awaitingConversion && !awaitingConversionAttempt && !awaitingBonusDart;
+  const needsToStartDrive =
+    !isCompleted &&
+    !isAwaitingOTCoinFlip &&
+    !currentDrive &&
+    !awaitingConversion &&
+    !awaitingConversionAttempt &&
+    !awaitingBonusDart;
 
-  // Compute drive summaries for display (8 dots per player)
   const computeDriveDots = (playerId: string): DriveDotState[] => {
-    const playerDrives = drives.filter(d => d.playerId === playerId);
+    const playerDrives = drives.filter((d) => d.playerId === playerId);
     const dots: DriveDotState[] = [];
-    
+
     for (let i = 0; i < 8; i++) {
       const drive = playerDrives[i];
       if (!drive) {
@@ -337,15 +395,14 @@ export default function GameTracker() {
 
   const player1Drives = computeDriveDots(player1.id);
   const player2Drives = computeDriveDots(player2.id);
-  
-  // Compute OT drive dots (2 per player per OT period, only shows current period)
+
   const computeOTDriveDots = (playerId: string): DriveDotState[] => {
     if (game.currentQuarter < 5) return [];
-    
+
     const currentOTPeriod = game.currentQuarter;
-    const otDrives = drives.filter(d => d.playerId === playerId && d.quarter === currentOTPeriod);
+    const otDrives = drives.filter((d) => d.playerId === playerId && d.quarter === currentOTPeriod);
     const dots: DriveDotState[] = [];
-    
+
     for (let i = 0; i < 2; i++) {
       const drive = otDrives[i];
       if (!drive) {
@@ -365,9 +422,9 @@ export default function GameTracker() {
 
   const player1OTDrives = computeOTDriveDots(player1.id);
   const player2OTDrives = computeOTDriveDots(player2.id);
+
   const driveStartPosition = currentDrive?.startPosition ?? pendingStartPosition;
 
-  // Determine the current action mode based on game state
   const getEffectiveActionMode = (): ActionMode => {
     if (awaitingBonusDart) return "bonus";
     if (awaitingConversionAttempt && pendingConversionType === "pat") return "pat";
@@ -412,10 +469,7 @@ export default function GameTracker() {
               </div>
             </CardHeader>
             <CardContent>
-              <Dartboard
-                onSelect={handleDartboardSelect}
-                disabled={isPending || !effectiveMode}
-              />
+              <Dartboard onSelect={handleDartboardSelect} disabled={isPending || !effectiveMode} />
 
               {/* Selection display and submit */}
               <div className="mt-4 space-y-3">
@@ -428,12 +482,7 @@ export default function GameTracker() {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={resetSelection}
-                        disabled={isPending}
-                      >
+                      <Button variant="outline" size="sm" onClick={resetSelection} disabled={isPending}>
                         Clear
                       </Button>
                       <Button
@@ -450,27 +499,19 @@ export default function GameTracker() {
                   </div>
                 ) : effectiveMode ? (
                   <div className="p-3 bg-muted/50 rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Tap where your dart landed
-                    </p>
+                    <p className="text-sm text-muted-foreground">Tap where your dart landed</p>
                   </div>
                 ) : isAwaitingOTCoinFlip ? (
                   <div className="p-3 bg-muted/50 rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Complete the OT coin flip to continue
-                    </p>
+                    <p className="text-sm text-muted-foreground">Complete the OT coin flip to continue</p>
                   </div>
                 ) : needsToStartDrive ? (
                   <div className="p-3 bg-muted/50 rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Start drive to begin throwing
-                    </p>
+                    <p className="text-sm text-muted-foreground">Start drive to begin throwing</p>
                   </div>
                 ) : isCompleted ? (
                   <div className="p-3 bg-muted/50 rounded-md text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Game completed
-                    </p>
+                    <p className="text-sm text-muted-foreground">Game completed</p>
                   </div>
                 ) : null}
               </div>
@@ -499,29 +540,23 @@ export default function GameTracker() {
           />
 
           {!isCompleted && (
-            <MatchupOdds 
-              player1={player1} 
-              player2={player2} 
-              firstPossession={game.firstPossession} 
-            />
+            <MatchupOdds player1={player1} player2={player2} firstPossession={game.firstPossession} />
           )}
 
           {!isCompleted && (
             <>
-              {/* Action Console */}
               {isAwaitingOTCoinFlip ? (
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-center text-lg">
-                      {otCoinFlipWinner 
+                      {otCoinFlipWinner
                         ? `${otCoinFlipWinner === 1 ? player1.name : player2.name} Wins!`
-                        : "Overtime Coin Flip"
-                      }
+                        : "Overtime Coin Flip"}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex flex-col items-center justify-center py-4">
                     <Trophy className="h-10 w-10 text-amber-500 mb-4" />
-                    
+
                     {!otCoinFlipWinner ? (
                       <>
                         <p className="text-sm text-muted-foreground mb-4 text-center">
@@ -529,10 +564,7 @@ export default function GameTracker() {
                         </p>
                         <Button
                           size="lg"
-                          className={cn(
-                            "gap-2 min-w-40 transition-transform",
-                            isOtFlipping && "animate-spin"
-                          )}
+                          className={cn("gap-2 min-w-40 transition-transform", isOtFlipping && "animate-spin")}
                           onClick={handleOtCoinFlip}
                           disabled={isOtFlipping}
                           data-testid="button-ot-flip-coin"
@@ -543,9 +575,7 @@ export default function GameTracker() {
                       </>
                     ) : (
                       <>
-                        <p className="text-sm text-muted-foreground mb-4 text-center">
-                          Choose to receive or defer
-                        </p>
+                        <p className="text-sm text-muted-foreground mb-4 text-center">Choose to receive or defer</p>
                         <div className="grid grid-cols-2 gap-4 w-full">
                           <Button
                             size="lg"
@@ -586,7 +616,7 @@ export default function GameTracker() {
                 <Card>
                   <CardContent className="flex flex-col items-center justify-center py-6">
                     <Play className="h-8 w-8 text-primary mb-3" />
-                    <p className="font-semibold mb-1">{currentPlayer.name}'s Drive</p>
+                    <p className="font-semibold mb-1">{currentPlayer.name}&apos;s Drive</p>
                     <p className="text-sm text-muted-foreground mb-4">
                       Ready to start from {formatFieldPosition(pendingStartPosition)}
                     </p>
@@ -656,8 +686,8 @@ export default function GameTracker() {
                   </CardHeader>
                   <CardContent className="text-center">
                     <p className="text-sm text-muted-foreground">
-                      {pendingConversionType === "pat" 
-                        ? "Hit Single 1, 5, or 20 for the extra point" 
+                      {pendingConversionType === "pat"
+                        ? "Hit Single 1, 5, or 20 for the extra point"
                         : "Hit the number 2 (any segment) for 2 points"}
                     </p>
                     <p className="text-sm font-medium mt-2">Tap the dartboard to record your throw</p>
@@ -716,7 +746,7 @@ export default function GameTracker() {
         </Button>
       )}
 
-      {/* Result popup for celebrations/sad moments */}
+      {/* Result popup */}
       <ResultPopup
         type={popup.type}
         player={popup.player}
@@ -730,168 +760,46 @@ export default function GameTracker() {
 
 function getModeTitle(mode: ActionMode): string {
   switch (mode) {
-    case "offense": return "Offense";
-    case "fg": return "Field Goal Attempt";
-    case "punt": return "Punt";
-    case "pat": return "PAT Attempt";
-    case "two_point": return "2-Point Attempt";
-    case "bonus": return "Bonus Dart";
-    default: return "Dartboard";
+    case "offense":
+      return "Offense";
+    case "fg":
+      return "Field Goal Attempt";
+    case "punt":
+      return "Punt";
+    case "pat":
+      return "PAT Attempt";
+    case "two_point":
+      return "2-Point Attempt";
+    case "bonus":
+      return "Bonus Dart";
+    default:
+      return "Dartboard";
   }
 }
 
 function getModeInstruction(mode: ActionMode): string {
   switch (mode) {
-    case "offense": return "Advance the ball";
-    case "fg": return "Hit target for 3 pts";
-    case "punt": return "Pin opponent deep";
-    case "pat": return "Single 1/5/20 = 1 pt";
-    case "two_point": return "Hit #2 = 2 pts";
-    case "bonus": return "Single 1 = TD!";
-    default: return "";
+    case "offense":
+      return "Advance the ball";
+    case "fg":
+      return "Hit target for 3 pts";
+    case "punt":
+      return "Pin opponent deep";
+    case "pat":
+      return "Single 1/5/20 = 1 pt";
+    case "two_point":
+      return "Hit #2 = 2 pts";
+    case "bonus":
+      return "Single 1 = TD!";
+    default:
+      return "";
   }
-}
-
-function Scoreboard({
-  player1,
-  player2,
-  player1Score,
-  player2Score,
-  possession,
-  isCompleted,
-  winnerId,
-}: {
-  player1: Profile;
-  player2: Profile;
-  player1Score: number;
-  player2Score: number;
-  possession: number;
-  isCompleted: boolean;
-  winnerId: string | null;
-}) {
-  return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1 text-center">
-            <div className="flex items-center justify-center gap-2 mb-1">
-              {!isCompleted && possession === 1 && (
-                <Crosshair className="h-4 w-4 text-primary animate-pulse" />
-              )}
-              {isCompleted && winnerId === player1.id && (
-                <Trophy className="h-4 w-4 text-primary" />
-              )}
-              <p className="font-semibold truncate text-sm" data-testid="text-player1-name">
-                {player1.name}
-              </p>
-            </div>
-            <p
-              className="text-4xl md:text-5xl font-bold font-mono text-primary"
-              data-testid="text-player1-score"
-            >
-              {player1Score}
-            </p>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xl text-muted-foreground">vs</span>
-            {!isCompleted && (
-              <ArrowRight
-                className={cn(
-                  "h-5 w-5 text-primary transition-transform",
-                  possession === 1 && "rotate-180"
-                )}
-              />
-            )}
-          </div>
-          <div className="flex-1 text-center">
-            <div className="flex items-center justify-center gap-2 mb-1">
-              {!isCompleted && possession === 2 && (
-                <Crosshair className="h-4 w-4 text-primary animate-pulse" />
-              )}
-              {isCompleted && winnerId === player2.id && (
-                <Trophy className="h-4 w-4 text-primary" />
-              )}
-              <p className="font-semibold truncate text-sm" data-testid="text-player2-name">
-                {player2.name}
-              </p>
-            </div>
-            <p
-              className="text-4xl md:text-5xl font-bold font-mono text-primary"
-              data-testid="text-player2-score"
-            >
-              {player2Score}
-            </p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function FieldPosition({ position, startPosition }: { position: number; startPosition: number }) {
-  const displayPosition = formatFieldPosition(position);
-  const progressPercent = (position / 100) * 100;
-
-  return (
-    <Card>
-      <CardContent className="py-3">
-        <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
-          <span>OWN</span>
-          <span className="font-mono font-bold text-base text-foreground" data-testid="text-field-position">
-            {displayPosition}
-          </span>
-          <span>OPP</span>
-        </div>
-        <div className="relative h-3 bg-muted rounded-full overflow-hidden">
-          <div className="absolute inset-0 flex">
-            <div className="w-1/2 border-r border-dashed border-muted-foreground/30" />
-            <div className="w-1/2" />
-          </div>
-          <div
-            className="absolute top-0 left-0 h-full bg-primary/30 transition-all duration-300"
-            style={{ width: `${progressPercent}%` }}
-          />
-          <div
-            className="absolute top-0 h-full w-2 bg-primary rounded-full transition-all duration-300"
-            style={{ left: `calc(${progressPercent}% - 4px)` }}
-          />
-        </div>
-        <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
-          <span>0</span>
-          <span>50</span>
-          <span>100</span>
-        </div>
-      </CardContent>
-    </Card>
-  );
 }
 
 function formatFieldPosition(position: number): string {
-  if (position < 50) {
-    return `OWN ${position}`;
-  } else if (position === 50) {
-    return "50";
-  } else {
-    return `OPP ${100 - position}`;
-  }
-}
-
-function DartCounter({ count }: { count: number }) {
-  return (
-    <div className="flex items-center justify-center gap-3">
-      <span className="text-sm text-muted-foreground">Darts:</span>
-      {[1, 2, 3, 4].map((num) => (
-        <Circle
-          key={num}
-          className={cn(
-            "h-4 w-4 transition-colors",
-            num <= count ? "fill-primary text-primary" : "text-muted-foreground"
-          )}
-          data-testid={`dart-indicator-${num}`}
-        />
-      ))}
-    </div>
-  );
+  if (position < 50) return `OWN ${position}`;
+  if (position === 50) return "50";
+  return `OPP ${100 - position}`;
 }
 
 function ActionButtons({
@@ -975,9 +883,7 @@ function PlayByPlayFeed({
       <CardContent>
         <ScrollArea className="h-48 lg:h-64">
           {sortedEvents.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No events yet
-            </p>
+            <p className="text-sm text-muted-foreground text-center py-4">No events yet</p>
           ) : (
             <div className="space-y-2">
               {sortedEvents.map((event, idx) => (
@@ -993,9 +899,7 @@ function PlayByPlayFeed({
                   <EventIcon type={event.type} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm">{event.description}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {getPlayerName(event.playerId)}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{getPlayerName(event.playerId)}</p>
                   </div>
                 </div>
               ))}
@@ -1028,9 +932,9 @@ function formatDartSelection(segment: DartSegment, multiplier: DartMultiplier): 
   if (multiplier === "inner_bull") return "Inner Bull (Auto TD!)";
   if (multiplier === "outer_bull") return "Outer Bull (25 yards)";
 
-  const prefix =
-    multiplier === "triple" ? "T" : multiplier === "double" ? "D" : "S";
-  const suffix = multiplier === "single_inner" ? " (inner)" : multiplier === "single_outer" ? " (outer)" : "";
+  const prefix = multiplier === "triple" ? "T" : multiplier === "double" ? "D" : "S";
+  const suffix =
+    multiplier === "single_inner" ? " (inner)" : multiplier === "single_outer" ? " (outer)" : "";
 
   let yards = segment;
   if (multiplier === "double") yards = segment * 2;
