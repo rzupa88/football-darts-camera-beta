@@ -103,6 +103,9 @@ export default function GameTracker() {
   const [popup, setPopup] = useState<PopupState>({ type: null, player: null, message: "" });
   const [otCoinFlipWinner, setOtCoinFlipWinner] = useState<1 | 2 | null>(null);
   const [isOtFlipping, setIsOtFlipping] = useState(false);
+    // ✅ Camera Mode: when ON, UI will poll /state so external camera POSTs appear without refresh
+  const [cameraMode, setCameraMode] = useState(false);
+
 
   const bustSoundRef = useRef<HTMLAudioElement | null>(null);
 
@@ -135,14 +138,26 @@ export default function GameTracker() {
     setPopup({ type: null, player: null, message: "" });
   }, []);
 
-  const { data: gameState, isLoading } = useQuery<GameStateResponse>({
-    queryKey: gameStateKey,
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/games/${id}/state`);
-      return res.json();
-    },
-    enabled: !!id,
-  });
+    const { data: gameState, isLoading } = useQuery<GameStateResponse>({
+  queryKey: gameStateKey,
+  queryFn: async () => {
+    const res = await apiRequest("GET", `/api/games/${id}/state`);
+    return res.json();
+  },
+  enabled: !!id,
+
+  refetchInterval: (query) => {
+    const data = query.state.data as GameStateResponse | undefined;
+    const isActive = data?.game?.status === "active";
+    return !!id && isActive && cameraMode ? 1000 : false;
+  },
+
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: false,
+  staleTime: 900,
+});
+
+
 
   const resetSelection = () => {
     setSelectedSegment(null);
@@ -449,7 +464,22 @@ export default function GameTracker() {
         <Badge variant={isCompleted ? "secondary" : "default"} data-testid="badge-game-status">
           {isCompleted ? "Completed" : game.status === "overtime" ? "Overtime" : `Q${game.currentQuarter}`}
         </Badge>
+                <Button
+          variant={cameraMode ? "default" : "outline"}
+          size="sm"
+          onClick={() => setCameraMode((v) => !v)}
+          className="gap-2"
+          data-testid="button-camera-mode"
+        >
+          {cameraMode ? "Camera Mode: ON" : "Camera Mode: OFF"}
+        </Button>
+
       </div>
+
+            <div className="text-xs opacity-60 mb-2" data-testid="debug-polling">
+        status: {game.status} | camera: {cameraMode ? "ON" : "OFF"} | events: {events.length}
+      </div>
+
 
       {/* Main two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
