@@ -118,7 +118,8 @@ export default function GameTracker() {
   const invalidateGameState = useCallback(async () => {
     if (!id) return;
     await queryClient.invalidateQueries({ queryKey: gameStateKey });
-    await queryClient.refetchQueries({ queryKey: gameStateKey });
+    await queryClient.invalidateQueries({ queryKey: gameStateKey });
+
   }, [id, gameStateKey]);
 
   const handleOtCoinFlip = () => {
