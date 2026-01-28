@@ -1,0 +1,12 @@
+{
+  "inner_bull_pct": 4,
+  "outer_bull_pct": 9,
+
+  "triple_inner_pct": 56,
+  "triple_outer_pct": 62,
+
+  "double_inner_pct": 94,
+  "double_outer_pct": 100,
+
+  "angle_offset_degrees": 7
+}
