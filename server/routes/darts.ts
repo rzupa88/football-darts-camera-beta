@@ -24,15 +24,23 @@ import {
 } from "./darts.helpers";
 
 export function registerDartRoutes(app: Express, storage: typeof import("../storage").storage) {
-  app.post("/api/games/:id/action", async (req, res) => {
-    try {
-      const game = await storage.getGame(req.params.id);
-      if (!game || game.status === "completed") {
-        return res.status(400).json({ error: "Cannot perform action" });
-      }
+app.post("/api/games/:id/action", async (req, res) => {
+  try {
+    const game = await storage.getGame(req.params.id);
+    if (!game || game.status === "completed") {
+      return res.status(400).json({ error: "Cannot perform action" });
+    }
 
-      const { action } = req.body;
-      const hit = buildDartHit(req.body);
+    const { action } = req.body;
+
+    // ✅ UNDO LAST DART — EARLY EXIT
+    if (action === "undo_last_dart") {
+      const undone = await storage.undoLastDart(game.id);
+      return res.json({ ok: true, undone });
+    }
+
+    const hit = buildDartHit(req.body);
+
 
       const segment = hit.segment;
       const multiplier = hit.multiplier;
@@ -623,7 +631,7 @@ export function registerDartRoutes(app: Express, storage: typeof import("../stor
         return;
       }
 
-      // Normal dart advance
+            // Normal dart advance
       const dartThrow: InsertDartThrow = {
         gameId: game.id,
         driveId: currentDrive.id,
@@ -644,25 +652,24 @@ export function registerDartRoutes(app: Express, storage: typeof import("../stor
         pointsAwarded: 0,
         rulePath: "ADVANCE",
       };
-      await storage.createDartThrow(dartThrow);
 
-      const newDartCount = currentDrive.dartCount + 1;
-      await storage.updateDrive(currentDrive.id, {
-        dartCount: newDartCount,
-        yardsGained: totalYards,
-        currentPosition: newPosition,
-      });
-
-      await storage.createEvent({
-        gameId: game.id,
+      const updatedDrive = await storage.recordDartAndProject({
         driveId: currentDrive.id,
-        playerId,
-        type: "dart",
-        data: { ...dartResult },
-        description: `${formatDartResult(dartResult)} - ${dartResult.yards} yards. Now at ${formatFieldPosition(
-          newPosition
-        )}`,
+        dartThrow,
+        event: {
+          gameId: game.id,
+          driveId: currentDrive.id,
+          playerId,
+          type: "dart",
+          data: { ...dartResult },
+          description: `${formatDartResult(dartResult)} - ${dartResult.yards} yards. Now at ${formatFieldPosition(
+            newPosition
+          )}`,
+        },
       });
+
+      // Use projected value (single source of truth)
+      const newDartCount = updatedDrive?.dartCount ?? currentDrive.dartCount + 1;
 
       // Check if 4 darts used
       if (newDartCount >= 4) {
@@ -704,8 +711,8 @@ export function registerDartRoutes(app: Express, storage: typeof import("../stor
 
       res.json({ success: true });
     } catch (error) {
-      console.error("Error performing action:", error);
-      res.status(500).json({ error: "Failed to perform action" });
+      console.error("Error in action endpoint:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -739,7 +746,8 @@ export function registerDartRoutes(app: Express, storage: typeof import("../stor
       const existingThrows = await storage.getDartThrows(currentDrive.id);
       const throwIndex = existingThrows.length + 1;
 
-      const isSingle1 = (multiplier === "single_inner" || multiplier === "single_outer") && segment === 1;
+      const isSingle1 =
+        (multiplier === "single_inner" || multiplier === "single_outer") && segment === 1;
 
       if (isSingle1) {
         const dartThrow: InsertDartThrow = {
@@ -796,126 +804,63 @@ export function registerDartRoutes(app: Express, storage: typeof import("../stor
           description: `TOUCHDOWN! (Bonus dart Single 1)`,
         });
 
-        res.json({ success: true, touchdown: true });
-      } else {
-        const dartThrow: InsertDartThrow = {
-          gameId: game.id,
-          driveId: currentDrive.id,
-          playerId,
-          throwIndex,
-          phase: "bonus_one_yard_cushion",
-          hitType,
-          numberHit: getNumberHit(multiplier as Multiplier, segment),
-          ring,
-          multiplier: numericMultiplier,
-          posBefore: 99,
-          posAfter: 99,
-          requiredDistanceBefore: 1,
-          requiredDistanceAfter: 1,
-          dartsRemainingBefore: 1,
-          dartsRemainingAfter: 0,
-          yardsAwarded: 0,
-          pointsAwarded: 0,
-          isBust: true,
-          rulePath: "BONUS_DART_MISS",
-        };
-        await storage.createDartThrow(dartThrow);
-
-        await storage.updateDrive(currentDrive.id, {
-          result: "bust",
-          endPosition: 99,
-          endedAt: new Date(),
-        });
-
-        await storage.createEvent({
-          gameId: game.id,
-          driveId: currentDrive.id,
-          playerId,
-          type: "dart",
-          data: { ...dartResult, bonusDart: true },
-          description: `Bonus dart: ${formatDartResult(dartResult)} - Needed Single 1`,
-        });
-
-        await storage.createEvent({
-          gameId: game.id,
-          driveId: currentDrive.id,
-          playerId,
-          type: "bust",
-          data: { bonusDartMissed: true },
-          description: `Bonus dart missed! Drive ends.`,
-        });
-
-        await handleDriveEnd(game, storage);
-
-        res.json({ success: true, touchdown: false });
+        return res.json({ success: true, touchdown: true });
       }
+
+      // bonus dart miss -> bust
+      const dartThrow: InsertDartThrow = {
+        gameId: game.id,
+        driveId: currentDrive.id,
+        playerId,
+        throwIndex,
+        phase: "bonus_one_yard_cushion",
+        hitType,
+        numberHit: getNumberHit(multiplier as Multiplier, segment),
+        ring,
+        multiplier: numericMultiplier,
+        posBefore: 99,
+        posAfter: 99,
+        requiredDistanceBefore: 1,
+        requiredDistanceAfter: 1,
+        dartsRemainingBefore: 1,
+        dartsRemainingAfter: 0,
+        yardsAwarded: 0,
+        pointsAwarded: 0,
+        isBust: true,
+        rulePath: "BONUS_DART_MISS",
+      };
+      await storage.createDartThrow(dartThrow);
+
+      await storage.updateDrive(currentDrive.id, {
+        result: "bust",
+        endPosition: 99,
+        endedAt: new Date(),
+      });
+
+      await storage.createEvent({
+        gameId: game.id,
+        driveId: currentDrive.id,
+        playerId,
+        type: "dart",
+        data: { ...dartResult, bonusDart: true },
+        description: `Bonus dart: ${formatDartResult(dartResult)} - Needed Single 1`,
+      });
+
+      await storage.createEvent({
+        gameId: game.id,
+        driveId: currentDrive.id,
+        playerId,
+        type: "bust",
+        data: { bonusDartMissed: true },
+        description: `Bonus dart missed! Drive ends.`,
+      });
+
+      await handleDriveEnd(game, storage);
+
+      return res.json({ success: true, touchdown: false });
     } catch (error) {
       console.error("Error applying bonus dart:", error);
-      res.status(500).json({ error: "Failed to apply bonus dart" });
-    }
-  });
-
-  // Undo last action
-  app.post("/api/games/:id/undo", async (req, res) => {
-    try {
-      const game = await storage.getGame(req.params.id);
-      if (!game) {
-        return res.status(404).json({ error: "Game not found" });
-      }
-
-      const events = await storage.getEvents(game.id);
-      if (events.length === 0) {
-        return res.json({ success: false });
-      }
-
-      const lastEvent = events[events.length - 1];
-
-      const deleted = await storage.deleteLastEvent(req.params.id);
-      if (!deleted) {
-        return res.json({ success: false });
-      }
-
-      if (lastEvent.type === "dart" && lastEvent.driveId) {
-        // Also delete the last dart throw
-        await storage.deleteLastDartThrow(lastEvent.driveId);
-
-        const currentDrive = await storage.getDrive(lastEvent.driveId);
-        if (currentDrive) {
-          const remainingEvents = events.filter(
-            (e) =>
-              e.driveId === lastEvent.driveId &&
-              e.type === "dart" &&
-              e.id !== lastEvent.id &&
-              e.data &&
-              typeof e.data === "object" &&
-              "yards" in e.data
-          );
-
-          let yardsGained = 0;
-          for (const event of remainingEvents) {
-            const data = event.data as Record<string, unknown>;
-            if (typeof data.yards === "number") {
-              yardsGained += data.yards;
-            }
-          }
-
-          const newPosition = currentDrive.startPosition + yardsGained;
-          await storage.updateDrive(currentDrive.id, {
-            dartCount: remainingEvents.length,
-            yardsGained,
-            currentPosition: newPosition,
-            result: null,
-            pointsScored: 0,
-            endPosition: null,
-            endedAt: null,
-          });
-        }
-      }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error undoing action:", error);
-      res.status(500).json({ error: "Failed to undo" });
+      return res.status(500).json({ error: "Failed to apply bonus dart" });
     }
   });
 }

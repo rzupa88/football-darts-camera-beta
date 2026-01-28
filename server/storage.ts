@@ -1,5 +1,6 @@
-import { 
-  type Profile, 
+// server/storage.ts
+import {
+  type Profile,
   type InsertProfile,
   type Game,
   type InsertGame,
@@ -54,9 +55,20 @@ export interface IStorage {
 
   // Dart Throws
   createDartThrow(dartThrow: InsertDartThrow): Promise<DartThrowRecord>;
+
+  // Canonical atomic dart write + projection
+  recordDartAndProject(args: {
+    driveId: string;
+    dartThrow: InsertDartThrow;
+    event: InsertEvent;
+  }): Promise<Drive | undefined>;
+
   getDartThrows(driveId: string): Promise<DartThrowRecord[]>;
   getHeatMapData(filters: HeatMapFilters): Promise<HeatMapData[]>;
   deleteLastDartThrow(driveId: string): Promise<boolean>;
+
+  // Undo Last Dart for Game
+  undoLastDart(gameId: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -86,37 +98,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getProfileStats(id: string): Promise<ProfileStats> {
-    const playerGames = await db.select().from(games).where(
-      and(
-        eq(games.status, "completed"),
-        or(eq(games.player1Id, id), eq(games.player2Id, id))
-      )
-    );
-    
-    const wins = playerGames.filter(g => g.winnerId === id).length;
+    const playerGames = await db
+      .select()
+      .from(games)
+      .where(and(eq(games.status, "completed"), or(eq(games.player1Id, id), eq(games.player2Id, id))));
+
+    const wins = playerGames.filter((g) => g.winnerId === id).length;
     const losses = playerGames.length - wins;
-    
+
     let totalPoints = 0;
-    playerGames.forEach(g => {
+    playerGames.forEach((g) => {
       totalPoints += g.player1Id === id ? g.player1Score : g.player2Score;
     });
 
     const playerDrives = await db.select().from(drives).where(eq(drives.playerId, id));
-    
-    const throwStats = await db.select({
-      totalDarts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'offense')`,
-      totalYards: sql<number>`coalesce(sum(${dartThrows.yardsAwarded}) filter (where ${dartThrows.phase} = 'offense'), 0)`,
-      touchdowns: sql<number>`count(*) filter (where ${dartThrows.isTd} = true)`,
-      innerBullTDs: sql<number>`count(*) filter (where ${dartThrows.isTd} = true and ${dartThrows.hitType} = 'inner_bull')`,
-      fgAttempts: sql<number>`count(*) filter (where ${dartThrows.isFgAttempt} = true)`,
-      fgMakes: sql<number>`count(*) filter (where ${dartThrows.isFgGood} = true)`,
-      patAttempts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'conversion_pat')`,
-      patMakes: sql<number>`count(*) filter (where ${dartThrows.isPatGood} = true)`,
-      twoPtAttempts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'conversion_two')`,
-      twoPtMakes: sql<number>`count(*) filter (where ${dartThrows.isTwoGood} = true)`,
-    }).from(dartThrows).where(eq(dartThrows.playerId, id));
 
-    const stats = throwStats[0] || {};
+    const throwStats = await db
+      .select({
+        totalDarts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'offense')`,
+        totalYards: sql<number>`coalesce(sum(${dartThrows.yardsAwarded}) filter (where ${dartThrows.phase} = 'offense'), 0)`,
+        touchdowns: sql<number>`count(*) filter (where ${dartThrows.isTd} = true)`,
+        innerBullTDs: sql<number>`count(*) filter (where ${dartThrows.isTd} = true and ${dartThrows.hitType} = 'inner_bull')`,
+        fgAttempts: sql<number>`count(*) filter (where ${dartThrows.isFgAttempt} = true)`,
+        fgMakes: sql<number>`count(*) filter (where ${dartThrows.isFgGood} = true)`,
+        patAttempts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'conversion_pat')`,
+        patMakes: sql<number>`count(*) filter (where ${dartThrows.isPatGood} = true)`,
+        twoPtAttempts: sql<number>`count(*) filter (where ${dartThrows.phase} = 'conversion_two')`,
+        twoPtMakes: sql<number>`count(*) filter (where ${dartThrows.isTwoGood} = true)`,
+      })
+      .from(dartThrows)
+      .where(eq(dartThrows.playerId, id));
+
+    const stats = throwStats[0] || ({} as any);
     const totalDarts = Number(stats.totalDarts) || 0;
     const totalYards = Number(stats.totalYards) || 0;
     const touchdowns = Number(stats.touchdowns) || 0;
@@ -156,33 +169,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getProfileHeadToHead(id: string): Promise<HeadToHead[]> {
-    const playerGames = await db.select().from(games).where(
-      and(
-        eq(games.status, "completed"),
-        or(eq(games.player1Id, id), eq(games.player2Id, id))
-      )
-    );
-    
-    const h2hMap = new Map<string, { wins: number; losses: number; games: number; pointsFor: number; pointsAgainst: number }>();
-    
-    playerGames.forEach(g => {
+    const playerGames = await db
+      .select()
+      .from(games)
+      .where(and(eq(games.status, "completed"), or(eq(games.player1Id, id), eq(games.player2Id, id))));
+
+    const h2hMap = new Map<
+      string,
+      { wins: number; losses: number; games: number; pointsFor: number; pointsAgainst: number }
+    >();
+
+    playerGames.forEach((g) => {
       const isPlayer1 = g.player1Id === id;
       const opponentId = isPlayer1 ? g.player2Id : g.player1Id;
       const pointsFor = isPlayer1 ? g.player1Score : g.player2Score;
       const pointsAgainst = isPlayer1 ? g.player2Score : g.player1Score;
-      
-      const current = h2hMap.get(opponentId) || { wins: 0, losses: 0, games: 0, pointsFor: 0, pointsAgainst: 0 };
+
+      const current = h2hMap.get(opponentId) || {
+        wins: 0,
+        losses: 0,
+        games: 0,
+        pointsFor: 0,
+        pointsAgainst: 0,
+      };
+
       current.games++;
       current.pointsFor += pointsFor;
       current.pointsAgainst += pointsAgainst;
-      if (g.winnerId === id) {
-        current.wins++;
-      } else {
-        current.losses++;
-      }
+
+      if (g.winnerId === id) current.wins++;
+      else current.losses++;
+
       h2hMap.set(opponentId, current);
     });
-    
+
     const results: HeadToHead[] = [];
     for (const [opponentId, record] of h2hMap) {
       const opponent = await this.getProfile(opponentId);
@@ -196,14 +216,16 @@ export class DatabaseStorage implements IStorage {
         pointsAgainst: record.pointsAgainst,
       });
     }
-    
+
     return results;
   }
 
   async getProfileGames(id: string): Promise<Game[]> {
-    return db.select().from(games).where(
-      or(eq(games.player1Id, id), eq(games.player2Id, id))
-    ).orderBy(desc(games.createdAt));
+    return db
+      .select()
+      .from(games)
+      .where(or(eq(games.player1Id, id), eq(games.player2Id, id)))
+      .orderBy(desc(games.createdAt));
   }
 
   // Game methods
@@ -218,12 +240,15 @@ export class DatabaseStorage implements IStorage {
 
   async createGame(game: InsertGame): Promise<Game> {
     const possession = game.possession ?? 1;
-    const [newGame] = await db.insert(games).values({
-      player1Id: game.player1Id,
-      player2Id: game.player2Id,
-      possession,
-      firstPossession: possession,
-    }).returning();
+    const [newGame] = await db
+      .insert(games)
+      .values({
+        player1Id: game.player1Id,
+        player2Id: game.player2Id,
+        possession,
+        firstPossession: possession,
+      })
+      .returning();
     return newGame;
   }
 
@@ -243,16 +268,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createDrive(drive: InsertDrive): Promise<Drive> {
-    const [newDrive] = await db.insert(drives).values({
-      gameId: drive.gameId,
-      playerId: drive.playerId,
-      quarter: drive.quarter,
-      startPosition: drive.startPosition ?? 30,
-      currentPosition: drive.startPosition ?? 30,
-      startReason: drive.startReason ?? "default_own_30",
-      driveInQuarter: drive.driveInQuarter ?? 1,
-      sequenceInGame: drive.sequenceInGame ?? 1,
-    }).returning();
+    const [newDrive] = await db
+      .insert(drives)
+      .values({
+        gameId: drive.gameId,
+        playerId: drive.playerId,
+        quarter: drive.quarter,
+        startPosition: drive.startPosition ?? 30,
+        currentPosition: drive.startPosition ?? 30,
+        startReason: drive.startReason ?? "default_own_30",
+        driveInQuarter: drive.driveInQuarter ?? 1,
+        sequenceInGame: drive.sequenceInGame ?? 1,
+      })
+      .returning();
     return newDrive;
   }
 
@@ -262,9 +290,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCurrentDrive(gameId: string): Promise<Drive | undefined> {
-    const [drive] = await db.select().from(drives).where(
-      and(eq(drives.gameId, gameId), isNull(drives.result))
-    ).orderBy(desc(drives.createdAt)).limit(1);
+    const [drive] = await db
+      .select()
+      .from(drives)
+      .where(and(eq(drives.gameId, gameId), isNull(drives.result)))
+      .orderBy(desc(drives.createdAt))
+      .limit(1);
     return drive || undefined;
   }
 
@@ -279,25 +310,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createEvent(event: InsertEvent): Promise<GameEvent> {
-    const [newEvent] = await db.insert(events).values({
-      gameId: event.gameId,
-      driveId: event.driveId ?? null,
-      playerId: event.playerId,
-      type: event.type,
-      data: event.data ?? null,
-      description: event.description,
-    }).returning();
+    const [newEvent] = await db
+      .insert(events)
+      .values({
+        gameId: event.gameId,
+        driveId: event.driveId ?? null,
+        playerId: event.playerId,
+        type: event.type,
+        data: event.data ?? null,
+        description: event.description,
+      })
+      .returning();
     return newEvent;
   }
 
   async deleteLastEvent(gameId: string): Promise<boolean> {
-    const lastEvents = await db.select().from(events)
+    const lastEvents = await db
+      .select()
+      .from(events)
       .where(eq(events.gameId, gameId))
       .orderBy(desc(events.createdAt))
       .limit(1);
-    
+
     if (lastEvents.length === 0) return false;
-    
+
     const result = await db.delete(events).where(eq(events.id, lastEvents[0].id));
     return (result.rowCount ?? 0) > 0;
   }
@@ -308,13 +344,65 @@ export class DatabaseStorage implements IStorage {
     return newThrow;
   }
 
+  // ✅ NEW: atomic write + projection
+  async recordDartAndProject(args: {
+    driveId: string;
+    dartThrow: InsertDartThrow;
+    event: InsertEvent;
+  }): Promise<Drive | undefined> {
+    const { driveId, dartThrow, event } = args;
+
+    return db.transaction(async (tx) => {
+      // 1) Insert dart throw
+      await tx.insert(dartThrows).values(dartThrow);
+
+      // 2) Insert event
+      await tx.insert(events).values({
+        gameId: event.gameId,
+        driveId: event.driveId ?? null,
+        playerId: event.playerId,
+        type: event.type,
+        data: event.data ?? null,
+        description: event.description,
+      });
+
+      // 3) Recompute projection from throws (source of truth)
+      const throwsForDrive = await tx
+        .select({
+          posAfter: dartThrows.posAfter,
+          yardsAwarded: dartThrows.yardsAwarded,
+        })
+        .from(dartThrows)
+        .where(eq(dartThrows.driveId, driveId))
+        .orderBy(dartThrows.throwIndex);
+
+      const dartCount = throwsForDrive.length;
+      const yardsGained = throwsForDrive.reduce((sum, t) => sum + (t.yardsAwarded ?? 0), 0);
+      const last = throwsForDrive[throwsForDrive.length - 1];
+      const currentPosition = last?.posAfter;
+
+      const [updated] = await tx
+        .update(drives)
+        .set({
+          dartCount,
+          yardsGained,
+          ...(currentPosition !== undefined ? { currentPosition } : {}),
+          endPosition: null, // keep drive "open" unless ended elsewhere
+        })
+        .where(eq(drives.id, driveId))
+        .returning();
+
+      return updated || undefined;
+    });
+  }
+
   async getDartThrows(driveId: string): Promise<DartThrowRecord[]> {
     return db.select().from(dartThrows).where(eq(dartThrows.driveId, driveId)).orderBy(dartThrows.throwIndex);
   }
 
   async getHeatMapData(filters: HeatMapFilters): Promise<HeatMapData[]> {
     const conditions = [eq(dartThrows.playerId, filters.profileId)];
-    
+
     if (filters.gameId) {
       conditions.push(eq(dartThrows.gameId, filters.gameId));
     }
@@ -329,29 +417,35 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (filters.opponentId) {
-      const opponentGames = await db.select({ id: games.id }).from(games).where(
-        and(
-          or(eq(games.player1Id, filters.opponentId), eq(games.player2Id, filters.opponentId)),
-          or(eq(games.player1Id, filters.profileId), eq(games.player2Id, filters.profileId))
-        )
-      );
-      const gameIds = opponentGames.map(g => g.id);
+      const opponentGames = await db
+        .select({ id: games.id })
+        .from(games)
+        .where(
+          and(
+            or(eq(games.player1Id, filters.opponentId), eq(games.player2Id, filters.opponentId)),
+            or(eq(games.player1Id, filters.profileId), eq(games.player2Id, filters.profileId))
+          )
+        );
+
+      const gameIds = opponentGames.map((g) => g.id);
       if (gameIds.length > 0) {
         conditions.push(sql`${dartThrows.gameId} = ANY(${gameIds})`);
       }
     }
 
-    const results = await db.select({
-      numberHit: dartThrows.numberHit,
-      ring: dartThrows.ring,
-      count: sql<number>`count(*)::int`,
-    }).from(dartThrows)
+    const results = await db
+      .select({
+        numberHit: dartThrows.numberHit,
+        ring: dartThrows.ring,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(dartThrows)
       .where(and(...conditions))
       .groupBy(dartThrows.numberHit, dartThrows.ring);
 
     const totalThrows = results.reduce((sum, r) => sum + r.count, 0);
-    
-    return results.map(r => ({
+
+    return results.map((r) => ({
       segment: r.numberHit ?? 0,
       ring: r.ring ?? "miss",
       count: r.count,
@@ -360,15 +454,99 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteLastDartThrow(driveId: string): Promise<boolean> {
-    const lastThrows = await db.select().from(dartThrows)
+    const lastThrows = await db
+      .select()
+      .from(dartThrows)
       .where(eq(dartThrows.driveId, driveId))
       .orderBy(desc(dartThrows.throwIndex))
       .limit(1);
-    
+
     if (lastThrows.length === 0) return false;
-    
+
     const result = await db.delete(dartThrows).where(eq(dartThrows.id, lastThrows[0].id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async undoLastDart(gameId: string): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      // 1) Find last dart event
+      const lastEvent = await tx
+        .select()
+        .from(events)
+        .where(and(eq(events.gameId, gameId), eq(events.type, "dart")))
+        .orderBy(desc(events.createdAt))
+        .limit(1);
+
+      if (lastEvent.length === 0) return false;
+
+      const event = lastEvent[0];
+      const driveId = event.driveId;
+
+      // Guard
+      if (!driveId) {
+        await tx.delete(events).where(eq(events.id, event.id));
+        return true;
+      }
+
+      // 2) Delete last dart throw for that drive
+      const lastThrow = await tx
+        .select()
+        .from(dartThrows)
+        .where(eq(dartThrows.driveId, driveId))
+        .orderBy(desc(dartThrows.throwIndex))
+        .limit(1);
+
+      if (lastThrow.length > 0) {
+        await tx.delete(dartThrows).where(eq(dartThrows.id, lastThrow[0].id));
+      }
+
+      // 3) Delete the event itself
+      await tx.delete(events).where(eq(events.id, event.id));
+
+      // 4) Rebuild drive projection from remaining throws
+      const [drive] = await tx.select().from(drives).where(eq(drives.id, driveId)).limit(1);
+      if (!drive) return true;
+
+      const remainingLast = await tx
+        .select()
+        .from(dartThrows)
+        .where(eq(dartThrows.driveId, driveId))
+        .orderBy(desc(dartThrows.throwIndex))
+        .limit(1);
+
+      if (remainingLast.length === 0) {
+        // No throws left -> reset to drive start
+        await tx
+          .update(drives)
+          .set({
+            dartCount: 0,
+            currentPosition: drive.startPosition,
+            yardsGained: 0,
+            endPosition: null,
+          })
+          .where(eq(drives.id, driveId));
+
+        return true;
+      }
+
+      const lastRemainingThrow = remainingLast[0];
+
+      const newCurrentPosition = lastRemainingThrow.posAfter;
+      const newDartCount = lastRemainingThrow.throwIndex; // existing behavior
+      const newYardsGained = newCurrentPosition - drive.startPosition;
+
+      await tx
+        .update(drives)
+        .set({
+          dartCount: newDartCount,
+          currentPosition: newCurrentPosition,
+          yardsGained: newYardsGained,
+          endPosition: null,
+        })
+        .where(eq(drives.id, driveId));
+
+      return true;
+    });
   }
 }
 
