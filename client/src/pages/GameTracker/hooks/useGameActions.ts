@@ -118,13 +118,29 @@ export function useGameActions({
   });
 
   const undoMutation = useMutation({
-    mutationFn: async () => apiRequest("POST", `/api/games/${id}/undo`, {}),
-    onSuccess: async () => {
-      await invalidateGameState();
-      toast({ title: "Action undone" });
-      resetSelection();
-    },
-  });
+  mutationFn: async () => {
+    const res = await apiRequest("POST", `/api/games/${id}/action`, {
+      action: "undo_last_dart",
+    });
+    return res.json() as Promise<{ ok: boolean; undone: boolean }>;
+  },
+  onSuccess: async (data) => {
+    await invalidateGameState();
+    resetSelection();
+
+    toast({
+      title: data?.undone ? "Last dart undone" : "Nothing to undo",
+    });
+  },
+  onError: () => {
+    toast({
+      title: "Error",
+      description: "Failed to undo last dart. Please try again.",
+      variant: "destructive",
+    });
+  },
+});
+
 
   const bonusDartMutation = useMutation({
     mutationFn: async (data: { segment: number; multiplier: string }) => {
